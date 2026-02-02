@@ -130,6 +130,31 @@ echo Copying resources to bin\Release...
 copy /y Build\MarkdownView.ini bin\Release\ >nul
 xcopy /s /e /y /i Build\css bin\Release\css >nul
 
+:: --- 4. Update installed plugin (Total Commander already closed above) ---
+set "TC_PLUGIN=c:\Program Files\totalcmd\plugins\wlx\MarkdownView"
+echo.
+echo === Updating installed plugin at %TC_PLUGIN% ===
+if not exist "%TC_PLUGIN%" (
+    echo Creating folder...
+    mkdir "%TC_PLUGIN%"
+)
+if not exist "%TC_PLUGIN%\css" (
+    mkdir "%TC_PLUGIN%\css"
+)
+if not exist "%TC_PLUGIN%" (
+    echo ERROR: Cannot access "%TC_PLUGIN%".
+    echo        Most likely you need to run BuildAll.bat "as Administrator" to write into Program Files.
+    echo        Skipping installed plugin update.
+) else (
+    copy /y bin\Release\MarkdownView.wlx64 "%TC_PLUGIN%"
+    copy /y bin\Release\Markdown-x64.dll "%TC_PLUGIN%"
+    copy /y bin\Release\MarkdigNative-x64.dll "%TC_PLUGIN%"
+    copy /y bin\Release\MarkdownView.ini "%TC_PLUGIN%"
+    xcopy /s /e /y /i bin\Release\css "%TC_PLUGIN%\css"
+    echo Plugin updated.
+)
+
+echo.
 echo === Build Successful (x64)! ===
 
 if defined TC_WAS_RUNNING (

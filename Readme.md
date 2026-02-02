@@ -12,6 +12,11 @@ upgraded to use the [Markdig Markdown Processor](https://github.com/xoofx/markdi
 - Modern GitHub-inspired styling.
 - Fast and lightweight.
 
+## Notes
+
+- **GitHub emoji shortcodes**: Markdig’s emoji parser requires whitespace before `:shortcode:`. GitHub often uses `:shortcode:` inside links (e.g. `[:arrow_up:Title](#...)`), so the plugin pre-processes a small set of GitHub-style shortcodes in `MarkdigNative/Lib.cs` (outside fenced code blocks) to match GitHub rendering.
+- **Performance**: Avoid per-request WebView2 interception unless needed. A global `WebResourceRequested` handler/filter can noticeably slow down opening small Markdown files with images.
+
 ## Fine Tuning
 
 Plugin configuration is specified in `MarkdownView.ini`. Markdown-related settings are:
@@ -30,3 +35,14 @@ The plugin is based on an obsolete Internet Explorer engine, which can be upgrad
 ## Setup
 
 The binary plugin archive comes with the setup script. Just enter the archive, and confirm installation.
+
+## Installation (manual / after build)
+
+Total Commander **does not create or copy** any plugin folder. When you add a Lister plugin in TC options, you only point to the **path to the `.wlx64` file**. The plugin then runs from **that file’s folder** and loads `MarkdownView.ini`, `css\`, and DLLs from the same directory (via `GetModuleFileName`).
+
+- **Option A:** Point TC to `bin\Release\MarkdownView.wlx64`. The plugin uses `bin\Release\` (and `bin\Release\css\`) as its root. No need for a folder under `c:\Program Files\totalcmd\plugins\wlx\`.
+- **Option B:** Create a folder yourself (e.g. `c:\Program Files\totalcmd\plugins\wlx\MarkdownView`), copy there: `MarkdownView.wlx64`, `Markdown-x64.dll`, `MarkdigNative-x64.dll`, `MarkdownView.ini`, and the `css\` folder. Then in TC point to `…\MarkdownView\MarkdownView.wlx64`.
+
+After a successful build, `BuildAll.bat` can update Option B’s folder automatically (with Total Commander closed).
+
+> Note: Updating `c:\Program Files\...` usually requires running `BuildAll.bat` **as Administrator**. If you point Total Commander directly to `bin\Release\MarkdownView.wlx64` (Option A), no Program Files deployment is required.

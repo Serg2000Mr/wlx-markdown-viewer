@@ -20,7 +20,7 @@ This project is a high-performance Markdown viewer plugin (.wlx) for Total Comma
 3.  **Lister Plugin (C++)**:
     -   Location: `MarkdownView/`
     -   Role: Implements Total Commander's Lister API.
-    -   UI: Uses the Internet Explorer 11 engine (via `WebBrowser` control) for HTML rendering.
+    -   UI: Uses **WebView2 (Edge/Chromium)** for HTML rendering (preferred). May fall back to the legacy IE WebBrowser control if WebView2 initialization fails.
     -   Output: `MarkdownView.wlx64`.
 
 ## Build System
@@ -42,5 +42,6 @@ This project is a high-performance Markdown viewer plugin (.wlx) for Total Comma
 
 -   **Memory Management**: Strings returned from C# AOT must be freed using the exported `FreeHtmlBuffer` function to avoid leaks.
 -   **Path Resolution**: The bridge DLL (`Markdown-x64.dll`) looks for `MarkdigNative-x64.dll` in the same directory.
--   **IE Compatibility**: The HTML generated includes `<meta http-equiv="X-UA-Compatible" content="IE=edge">` to force modern rendering.
+-   **Emoji shortcodes**: GitHub-style `:shortcode:` inside links (e.g. `[:arrow_up:Title](#...)`) is preprocessed in `MarkdigNative/Lib.cs` because Markdig’s emoji parser requires whitespace before the shortcode.
+-   **Performance note**: Avoid per-request WebView2 interception (e.g. global `WebResourceRequested` filters) unless strictly required; it adds noticeable latency for small Markdown files.
 -   **No CLR**: The C++ projects (`Markdown` and `MarkdownView`) MUST NOT have `/clr` enabled. They are pure native.

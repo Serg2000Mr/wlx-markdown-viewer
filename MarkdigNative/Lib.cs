@@ -6,6 +6,35 @@ namespace MarkdigNative;
 
 public static class Lib
 {
+    /// <summary>
+    /// GitHub-style :shortcode: → Unicode emoji (Markdig requires space before shortcode, so we pre-process).
+    /// </summary>
+    private static readonly Dictionary<string, string> GitHubEmojiShortcodes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        { ":arrow_up:", "⬆️" },
+        { ":white_check_mark:", "✅" },
+        { ":negative_squared_cross_mark:", "❎" },
+        { ":black_square_button:", "🔲" },
+    };
+
+    private static string ReplaceGitHubEmojiShortcodes(string text)
+    {
+        foreach (var kv in GitHubEmojiShortcodes)
+            text = text.Replace(kv.Key, kv.Value);
+        return text;
+    }
+
+    /// <summary>
+    /// Replace :shortcode: with emoji only outside fenced code blocks (```), so examples stay literal.
+    /// </summary>
+    private static string ReplaceGitHubEmojiOutsideCodeBlocks(string source)
+    {
+        string[] parts = source.Split("```");
+        for (int i = 0; i < parts.Length; i += 2)
+            parts[i] = ReplaceGitHubEmojiShortcodes(parts[i]);
+        return string.Join("```", parts);
+    }
+
     [UnmanagedCallersOnly(EntryPoint = "ConvertMarkdownToHtml")]
     public static unsafe IntPtr ConvertMarkdownToHtml(IntPtr filenamePtr, IntPtr cssFilePtr, IntPtr extensionsPtr)
     {
@@ -21,6 +50,7 @@ public static class Lib
             }
 
             string source = File.ReadAllText(filename);
+            source = ReplaceGitHubEmojiOutsideCodeBlocks(source);
             
             var builder = new MarkdownPipelineBuilder();
             
@@ -66,6 +96,8 @@ public static class Lib
             sb.AppendLine("</head>");
             sb.AppendLine("<body>");
             sb.AppendLine(Markdown.ToHtml(source, pipeline));
+            // Remove title from anchor links so hover shows no redundant tooltip (closer to GitHub)
+            sb.AppendLine("<script>(function(){ document.querySelectorAll('a[href^=\"#\"]').forEach(function(a){ a.removeAttribute('title'); }); })();</script>");
             sb.AppendLine("</body>");
             sb.AppendLine("</html>");
 

@@ -19,10 +19,12 @@ Based on: https://github.com/hyrious/github-markdown-css
 
 
 /******************    MAIN    ******************/
+/* Match GitHub: normal weight (400), 16px, line-height 1.5, system font stack */
 body {
-  font-family:'Arial Nova','Helvetica Neue',Helvetica,'Segoe UI',Arial,sans-serif,'Segoe UI Emoji','Noto Emoji';
-  font-size:12pt;
-  line-height:1.6;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans',Helvetica,Arial,sans-serif,'Segoe UI Emoji','Segoe UI Symbol';
+  font-size:16px;
+  font-weight:400;
+  line-height:1.5;
   color:#24292f;
   background-color:#ffffff;
   margin-left:1em;
@@ -86,6 +88,31 @@ h6 {
   margin-top:.7em;
   margin-bottom:0;
 }
+/* GitHub-like heading anchor icon:
+   - hidden by default (only appears on hover, like on GitHub)
+   - dark on hover (not blue)
+   - positioned INSIDE heading so it never goes beyond left edge */
+h1[id], h2[id], h3[id], h4[id], h5[id], h6[id] {
+  position: relative;
+  padding-left: 20px;
+}
+h1[id]::before, h2[id]::before, h3[id]::before, h4[id]::before, h5[id]::before, h6[id]::before {
+  content: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' width='16' height='16'%3E%3Cpath fill='%231f2328' d='M7.775 3.275a.75.75 0 001.06 1.06l1.25-1.25a2 2 0 112.83 2.83l-2.5 2.5a2 2 0 01-2.83 0 .75.75 0 00-1.06 1.06 3.5 3.5 0 004.95 0l2.5-2.5a3.5 3.5 0 00-4.95-4.95l-1.25 1.25zm-4.69 9.64a2 2 0 010-2.83l2.5-2.5a2 2 0 012.83 0 .75.75 0 001.06-1.06 3.5 3.5 0 00-4.95 0l-2.5 2.5a3.5 3.5 0 004.95 4.95l1.25-1.25a.75.75 0 00-1.06-1.06l-1.25 1.25a2 2 0 01-2.83 0z'/%3E%3C/svg%3E");
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  opacity: 0;
+}
+/* h2 has padding/border bottom, so the visual center is slightly above 50% */
+h2[id]::before {
+  top: calc(50% - 4px);
+}
+h1[id]:hover::before, h2[id]:hover::before, h3[id]:hover::before, h4[id]:hover::before, h5[id]:hover::before, h6[id]:hover::before {
+  opacity: 1;
+}
 h2:first-child,
 h1:first-child,
 h1:first-child + h2,
@@ -126,6 +153,7 @@ a {
   text-decoration:none;
 }
 a:hover {
+  color:#0550ae;
   text-decoration:underline;
 }
 img {
@@ -135,6 +163,7 @@ body>p {
   margin-top:0;
   margin-bottom:16px;
   word-wrap:break-word;
+  font-weight:400;
 }
 body>ul,
 body>ol {
@@ -143,6 +172,7 @@ body>ol {
 ul,
 ol {
   padding-left:32px;
+  font-weight:400;
 }
 ul.no-list,
 ol.no-list {
@@ -158,6 +188,7 @@ ol ul {
 }
 li {
   margin-bottom:0;
+  font-weight:400;
 }
 li > p {
   margin-top:0;
@@ -169,6 +200,7 @@ li > p + pre {
 blockquote {
   margin:16px 0;
   font-size:inherit;
+  font-weight:400;
   padding:5px 15px;
   color:#57606a;
   background-color:#EDEFF3;
@@ -192,7 +224,8 @@ hr {
 }
 table {
   margin:10px 0 15px 0;
-  font-size:12pt;
+  font-size:1em;
+  font-weight:400;
   border-collapse:collapse;
   border-spacing:0;
   display:block;
@@ -201,7 +234,7 @@ table {
   word-break:keep-all;
 }
 table th {
-  font-weight:bold;
+  font-weight:600;
   font-size:.9em;
   color:#1C2025;
   background-color:#EDEFF3;
@@ -210,6 +243,9 @@ table td,
 table th {
   border:1px solid #d0d7de;
   padding:6px 13px;
+}
+table td {
+  font-weight:400;
 }
 table td code {
   font-size:.9em;
