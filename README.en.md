@@ -53,6 +53,12 @@ EnableMath=1
 EnableEmoji=1
 ```
 
+## 🔍 Zoom Control
+
+- **Ctrl + Mouse Wheel** - Zoom in/out of the document
+- **Ctrl + 0** - Reset zoom to 100%
+- Perfect for reading documents with small text or detailed diagrams
+
 ## 🔧 Technical Details
 
 ### Architecture
