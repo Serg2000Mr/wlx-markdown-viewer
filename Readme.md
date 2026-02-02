@@ -1,5 +1,7 @@
 # Markdown Lister Plugin для Total Commander
 
+> **Read this in other languages:** [English](README.en.md) | Русский
+
 Плагин для просмотра Markdown файлов в Total Commander с современными возможностями и внешним видом как на GitHub.
 
 ![Скриншот работы плагина](Скриншот.png)
