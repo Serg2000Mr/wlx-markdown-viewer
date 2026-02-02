@@ -85,4 +85,4 @@
 - [Documentation / Документация](README.md)
 - [English Documentation](README.en.md)
 - [Quick Start Guide / Быстрый старт](QUICK_START.ru.md)
-- [Source Code / Исходный код](https://github.com/Serg2000Mr/wlx-markdown-viewer)
+- [Source Code / Исходный код](https://github.com/Serg2000Mr/wlx-markdown-viewer-github-style)

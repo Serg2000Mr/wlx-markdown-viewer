@@ -23,7 +23,7 @@ A plugin for viewing Markdown files in Total Commander with modern features and 
 
 ## 📦 Installation
 
-1. Download the archive from [Releases](https://github.com/Serg2000Mr/wlx-markdown-viewer/releases)
+1. Download the archive from [Releases](https://github.com/Serg2000Mr/wlx-markdown-viewer-github-style/releases)
 2. Open the archive in Total Commander
 3. Confirm plugin installation
 
@@ -112,6 +112,7 @@ This project is licensed under the MIT License - see the original repository for
 
 ## 🙏 Acknowledgments
 
+- [ezyuzin](https://github.com/ezyuzin/wlx-markdown-viewer) - Enhanced version with Markdig support
 - [Markdig](https://github.com/xoofx/markdig) - Excellent Markdown processor for .NET
 - [Mermaid.js](https://mermaid.js.org/) - Diagram and flowchart generation
 - [GitHub](https://github.com) - For the reference CSS styles

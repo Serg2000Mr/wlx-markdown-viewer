@@ -25,7 +25,7 @@
 
 ## 📦 Установка
 
-1. Скачайте архив из [Releases](https://github.com/Serg2000Mr/wlx-markdown-viewer/releases)
+1. Скачайте архив из [Releases](https://github.com/Serg2000Mr/wlx-markdown-viewer-github-style/releases)
 2. Откройте архив в Total Commander
 3. Подтвердите установку плагина
 
@@ -110,6 +110,7 @@ msbuild MarkdownView.sln /p:Configuration=Release /p:Platform=x64
 
 ## 🙏 Благодарности
 
+- **ezyuzin** за улучшенную версию [wlx-markdown-viewer](https://github.com/ezyuzin/wlx-markdown-viewer) с поддержкой Markdig
 - **rg-software** за оригинальный [wlx-markdown-viewer](https://github.com/rg-software/wlx-markdown-viewer) 
 - **xoofx** за процессор [Markdig](https://github.com/xoofx/markdig)
 
