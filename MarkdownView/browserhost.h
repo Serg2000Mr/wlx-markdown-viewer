@@ -40,6 +40,8 @@ public:
 	CComPtr<ICoreWebView2> mWebView;
 	CComPtr<ICoreWebView2Environment> mWebViewEnvironment;
 	bool mIsWebView2Initialized;
+	bool mIsShuttingDown;
+	static CComPtr<ICoreWebView2Environment> sSharedEnvironment;
 	double mZoomFactor;
 	long mScrollTop;
 	std::wstring mPendingHTML;

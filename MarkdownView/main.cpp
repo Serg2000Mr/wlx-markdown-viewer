@@ -386,26 +386,38 @@ void browser_show_file(CBrowserHost* browserHost, const char* filename, bool use
     sprintf(lenMsg, "HTML length: %zu", html.length());
     DebugLog("main.cpp:browser_show_file", lenMsg, "C");
 
-	// Удаляем предыдущий временный файл
 	CleanupTempHtmlFile();
 
-	// Создаём временный HTML файл в папке с исходным markdown файлом
-	// Используем Unicode для путей
-    
-    int size_needed = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0);
-    std::wstring wFile(size_needed, 0);
-    MultiByteToWideChar(CP_ACP, 0, filename, -1, &wFile[0], size_needed);
-    
+	int size_needed = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0);
+	std::wstring wFile(size_needed, 0);
+	MultiByteToWideChar(CP_ACP, 0, filename, -1, &wFile[0], size_needed);
+
+	wchar_t folderPath[MAX_PATH];
+	wcscpy(folderPath, wFile.c_str());
+	PathRemoveFileSpecW(folderPath);
+	browserHost->UpdateFolderMapping(folderPath);
+
+	if (browserHost->mIsWebView2Initialized && browserHost->mWebView) {
+		CComQIPtr<ICoreWebView2_3> webView3 = browserHost->mWebView;
+		if (webView3) {
+			const char* baseTag = "<base href='https://markdown.internal/'>";
+			size_t headPos = html.find("<head>");
+			if (headPos != std::string::npos) {
+				headPos += 6;
+				html.insert(headPos, baseTag);
+			}
+			browserHost->LoadWebBrowserFromStreamWrapper((const BYTE*)html.c_str(), (int)html.length());
+			return;
+		}
+	}
+
 	wchar_t tempPath[MAX_PATH];
-	wcscpy(tempPath, wFile.c_str());
-	PathRemoveFileSpecW(tempPath);
-    browserHost->mCurrentFolder = tempPath; // Store folder for WebView2 mapping
+	wcscpy(tempPath, folderPath);
 	wcscat(tempPath, L"\\_markdown_preview_temp.html");
 	wcscpy(TempHtmlFilePath, tempPath);
 
     DebugLogW("main.cpp:browser_show_file", TempHtmlFilePath, "C");
 
-	// Записываем HTML во временный файл через _wfopen для Unicode пути
 	FILE* f = _wfopen(TempHtmlFilePath, L"wb");
 	if (f)
 	{
@@ -413,14 +425,11 @@ void browser_show_file(CBrowserHost* browserHost, const char* filename, bool use
 		fclose(f);
         DebugLog("main.cpp:browser_show_file", "File written", "C");
 
-        // Use Navigate to the virtual domain for the file
-        // Changing to https and a different name to avoid potential 3s delay
         browserHost->Navigate(TempHtmlFilePath);
 	}
 	else
 	{
         DebugLog("main.cpp:browser_show_file", "Failed to open temp file for writing", "C");
-		// Fallback
 		browserHost->LoadWebBrowserFromStreamWrapper((const BYTE*)html.c_str(), (int)html.length());
 	}
 }
@@ -549,12 +558,20 @@ int _stdcall ListSearchTextW(HWND ListWin, WCHAR* SearchString, int SearchParame
 void __stdcall ListCloseWindow(HWND ListWin)
 {
     DestroyWindow(ListWin);
+	--num_lister_windows;
+
+	// Освобождаем общий WebView2 Environment ДО OleUninitialize().
+	// Иначе COM-объект может быть разрушен уже после деинициализации COM (например при выгрузке DLL),
+	// что приводит к падению Total Commander при закрытии процесса.
+	if (num_lister_windows == 0) {
+		CBrowserHost::sSharedEnvironment.Release();
+	}
+
 	OleUninitialize();
 
 	// Удаляем временный HTML файл
 	CleanupTempHtmlFile();
 
-	--num_lister_windows;
 	if(!(options.flags&OPT_KEEPHOOKNOWINDOWS)&&hook_keyb&&num_lister_windows==0)
 	{
 		UnhookWindowsHookEx(hook_keyb);
