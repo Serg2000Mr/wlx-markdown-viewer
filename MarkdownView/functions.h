@@ -21,6 +21,8 @@
 #define PROP_BROWSER "HTMLView_Host"
 #define PROP_STATUS "HTMLView_StatusBar"
 #define PROP_TOOLBAR "HTMLView_Toolbar"
+#define PROP_TRANSLATEBTN "HTMLView_TranslateBtn"
+#define PROP_TRANSLATEICON "HTMLView_TranslateIcon"
 #define WM_IEVIEW_COMMAND (WM_USER+501)
 #define WM_IEVIEW_SEARCH (WM_USER+502)
 #define WM_IEVIEW_PRINT (WM_USER+503)

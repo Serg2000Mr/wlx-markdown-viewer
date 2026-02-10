@@ -143,6 +143,19 @@ bool CBrowserHost::CreateBrowser(HWND hParent)
 			Callback<ICoreWebView2WebMessageReceivedEventHandler>(
 				[this](ICoreWebView2* sender, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
 					auto UpdateToolbarButtonText = [this](int buttonId, const std::wstring& text) {
+						if (buttonId == TBB_TRANSLATE)
+						{
+							HWND translateBtn = (HWND)GetProp(mParentWin, PROP_TRANSLATEBTN);
+							if (translateBtn)
+							{
+								SetWindowTextW(translateBtn, text.c_str());
+								RECT rc{};
+								GetClientRect(mParentWin, &rc);
+								PostMessage(mParentWin, WM_SIZE, SIZE_RESTORED, MAKELPARAM(rc.right, rc.bottom));
+								return;
+							}
+						}
+
 						HWND toolbar = (HWND)GetProp(mParentWin, PROP_TOOLBAR);
 						if (!toolbar)
 							return;

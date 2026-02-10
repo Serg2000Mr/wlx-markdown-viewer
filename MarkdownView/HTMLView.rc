@@ -29,6 +29,8 @@ IDB_BITMAP1             BITMAP                  "toolbar_graybk.bmp"
 
 IDB_BITMAP2             BITMAP                  "toolbar.bmp"
 
+IDR_TRANSLATE_PNG       RCDATA                  "..\\Pictures\\googletranslate1 32.png"
+
 
 /////////////////////////////////////////////////////////////////////////////
 //

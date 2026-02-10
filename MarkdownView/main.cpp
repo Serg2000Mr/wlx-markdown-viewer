@@ -5,10 +5,13 @@
 #include <direct.h>
 #include <windows.h>
 #include <shlwapi.h>
+#include <gdiplus.h>
+#include <objidl.h>
 #include <fstream>
 #include <sstream>
 
 #pragma comment(lib, "Shlwapi.lib")
+#pragma comment(lib, "gdiplus.lib")
 #include "browserhost.h"
 #include "ListerPlugin.h"
 #include "resource.h"
@@ -50,6 +53,74 @@ char html_template_dark[512];
 char renderer_extensions[2048];
 
 namespace {
+	std::mutex gGdiPlusMutex;
+	ULONG_PTR gGdiPlusToken = 0;
+	HICON gTranslateIcon = NULL;
+	int gTranslateToolbarImageIndex = -1;
+
+	static void EnsureGdiPlus()
+	{
+		std::lock_guard<std::mutex> lock(gGdiPlusMutex);
+		if (gGdiPlusToken != 0)
+			return;
+		Gdiplus::GdiplusStartupInput input;
+		Gdiplus::GdiplusStartup(&gGdiPlusToken, &input, NULL);
+	}
+
+	static HICON LoadTranslateIcon32()
+	{
+		if (gTranslateIcon)
+			return gTranslateIcon;
+
+		EnsureGdiPlus();
+		if (gGdiPlusToken == 0)
+			return NULL;
+
+		HRSRC resInfo = FindResourceW(hinst, MAKEINTRESOURCEW(IDR_TRANSLATE_PNG), MAKEINTRESOURCEW(10));
+		if (!resInfo)
+			return NULL;
+		DWORD resSize = SizeofResource(hinst, resInfo);
+		if (resSize == 0)
+			return NULL;
+		HGLOBAL resData = LoadResource(hinst, resInfo);
+		if (!resData)
+			return NULL;
+		void* resPtr = LockResource(resData);
+		if (!resPtr)
+			return NULL;
+
+		HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, resSize);
+		if (!hMem)
+			return NULL;
+		void* memPtr = GlobalLock(hMem);
+		if (!memPtr)
+		{
+			GlobalFree(hMem);
+			return NULL;
+		}
+		memcpy(memPtr, resPtr, resSize);
+		GlobalUnlock(hMem);
+
+		IStream* stream = nullptr;
+		if (FAILED(CreateStreamOnHGlobal(hMem, TRUE, &stream)) || !stream)
+		{
+			GlobalFree(hMem);
+			return NULL;
+		}
+
+		Gdiplus::Bitmap bmp(stream, FALSE);
+		stream->Release();
+		if (bmp.GetLastStatus() != Gdiplus::Ok)
+			return NULL;
+
+		HICON icon = NULL;
+		if (bmp.GetHICON(&icon) != Gdiplus::Ok || !icon)
+			return NULL;
+
+		gTranslateIcon = icon;
+		return gTranslateIcon;
+	}
+
 	struct MarkdownHtmlCacheKey
 	{
 		std::wstring filenameLower;
@@ -224,6 +295,26 @@ namespace {
 		gTranslateUiTranslate = L"Translate";
 		gTranslateUiBusy = L"Translating...";
 		gTranslateUiOriginal = L"Original";
+	}
+
+	static void InitTranslateSettings()
+	{
+		gTranslateEnabled = GetPrivateProfileInt("Translate", "Enabled", 0, options.IniFileName) != 0;
+		gTranslateAuto = GetPrivateProfileInt("Translate", "Auto", 0, options.IniFileName) != 0;
+		char targetBuf[16]{};
+		GetPrivateProfileString("Translate", "Target", "auto", targetBuf, (DWORD)sizeof(targetBuf), options.IniFileName);
+
+		std::string userLang = GetUserLangTagForTranslate();
+		InitTranslateUiStrings(userLang);
+
+		std::string target = targetBuf;
+		std::transform(target.begin(), target.end(), target.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+		if (target.empty() || target == "auto")
+			target = userLang;
+		if (target.size() >= sizeof(gTranslateTargetLang))
+			target.resize(sizeof(gTranslateTargetLang) - 1);
+		memset(gTranslateTargetLang, 0, sizeof(gTranslateTargetLang));
+		memcpy(gTranslateTargetLang, target.c_str(), target.size());
 	}
 
 	static std::string WideToUtf8(const std::wstring& ws)
@@ -726,23 +817,22 @@ void InitProc()
 	GetPrivateProfileString("Renderer", "Extensions", "", &renderer_extensions[0], 2048, options.IniFileName);
 	GetPrivateProfileString("Renderer", "CustomCSS", "", &html_template[0], 512, options.IniFileName);
 	GetPrivateProfileString("Renderer", "CustomCSSDark", "", &html_template_dark[0], 512, options.IniFileName);
-
-	gTranslateEnabled = GetPrivateProfileInt("Translate", "Enabled", 0, options.IniFileName) != 0;
-	gTranslateAuto = GetPrivateProfileInt("Translate", "Auto", 0, options.IniFileName) != 0;
-	char targetBuf[16]{};
-	GetPrivateProfileString("Translate", "Target", "auto", targetBuf, (DWORD)sizeof(targetBuf), options.IniFileName);
-
-	std::string userLang = GetUserLangTagForTranslate();
-	InitTranslateUiStrings(userLang);
-
-	std::string target = targetBuf;
-	std::transform(target.begin(), target.end(), target.begin(), [](unsigned char c) { return (char)std::tolower(c); });
-	if (target.empty() || target == "auto")
-		target = userLang;
-	if (target.size() >= sizeof(gTranslateTargetLang))
-		target.resize(sizeof(gTranslateTargetLang) - 1);
-	memset(gTranslateTargetLang, 0, sizeof(gTranslateTargetLang));
-	memcpy(gTranslateTargetLang, target.c_str(), target.size());
+	InitTranslateSettings();
+	if (img_list && gTranslateToolbarImageIndex < 0)
+	{
+		HICON icon32 = LoadTranslateIcon32();
+		if (icon32)
+		{
+			HICON icon24 = (HICON)CopyImage(icon32, IMAGE_ICON, 24, 24, 0);
+			if (!icon24)
+				icon24 = icon32;
+			int idx = ImageList_AddIcon(img_list, icon24);
+			if (icon24 != icon32)
+				DestroyIcon(icon24);
+			if (idx >= 0)
+				gTranslateToolbarImageIndex = idx;
+		}
+	}
 }
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -776,9 +866,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	}
 	else if(message==WM_SIZE)
 	{
-		CBrowserHost* browser_host = (CBrowserHost*)GetProp(hWnd,PROP_BROWSER);
-		if(browser_host)
-			browser_host->Resize();
 		HWND status = (HWND)GetProp(hWnd, PROP_STATUS);
 		if(status)
 		{
@@ -791,11 +878,32 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		HWND toolbar = (HWND)GetProp(hWnd, PROP_TOOLBAR);
 		if(toolbar)
 		{
-			RECT toolbar_rc;
-			GetWindowRect(toolbar, &toolbar_rc);
-			MoveWindow(toolbar, 0, 0, LOWORD(lParam), toolbar_rc.bottom-toolbar_rc.top, TRUE);
+			SendMessage(toolbar, TB_AUTOSIZE, 0, 0);
+			DWORD btnSize = (DWORD)SendMessage(toolbar, TB_GETBUTTONSIZE, 0, 0);
+			int toolbarHeight = (int)HIWORD(btnSize);
+			if (toolbarHeight <= 0)
+			{
+				RECT toolbar_rc;
+				GetWindowRect(toolbar, &toolbar_rc);
+				toolbarHeight = toolbar_rc.bottom - toolbar_rc.top;
+				if (toolbarHeight <= 0)
+					toolbarHeight = 28;
+			}
+
+			RECT rc{};
+			GetClientRect(hWnd, &rc);
+			MoveWindow(toolbar, 0, 0, rc.right - rc.left, toolbarHeight, TRUE);
 			InvalidateRect(toolbar,NULL,TRUE);
 		}
+
+		CBrowserHost* browser_host = (CBrowserHost*)GetProp(hWnd,PROP_BROWSER);
+		if(browser_host)
+			browser_host->Resize();
+
+		if (status && IsWindow(status))
+			SetWindowPos(status, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+		if (toolbar && IsWindow(toolbar))
+			SetWindowPos(toolbar, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 	}
 	else if (message == WM_MD_RENDER_DONE)
 	{
@@ -827,36 +935,45 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	else if(message==WM_COMMAND)
 	{
 		CBrowserHost* browser_host = (CBrowserHost*)GetProp(hWnd,PROP_BROWSER);
-		if(browser_host && lParam==(LPARAM)GetProp(hWnd, PROP_TOOLBAR))
+		HWND toolbar = (HWND)GetProp(hWnd, PROP_TOOLBAR);
+		if (browser_host && (lParam == (LPARAM)toolbar))
 		{
 			switch(LOWORD(wParam))
 			{
 			case TBB_BACK:
-				browser_host->GoBack();
+				if (lParam == (LPARAM)toolbar)
+					browser_host->GoBack();
 				break;
 			case TBB_FORWARD:
-				browser_host->GoForward();
+				if (lParam == (LPARAM)toolbar)
+					browser_host->GoForward();
 				break;
 			case TBB_STOP:
-				browser_host->Stop();
+				if (lParam == (LPARAM)toolbar)
+					browser_host->Stop();
 				break;
 			case TBB_REFRESH:
-				RefreshBrowser(); // instead of browser_host->mWebBrowser->Refresh();
+				if (lParam == (LPARAM)toolbar)
+					RefreshBrowser(); // instead of browser_host->mWebBrowser->Refresh();
 				break;
 			case TBB_PRINT:
-				SendMessage(hWnd, WM_IEVIEW_PRINT, 0, 0);
+				if (lParam == (LPARAM)toolbar)
+					SendMessage(hWnd, WM_IEVIEW_PRINT, 0, 0);
 				break;
 			case TBB_COPY:
-				SendMessage(hWnd, WM_IEVIEW_COMMAND, lc_copy, 0);
+				if (lParam == (LPARAM)toolbar)
+					SendMessage(hWnd, WM_IEVIEW_COMMAND, lc_copy, 0);
 				break;
 			/*case TBB_PASTE:
 				SendMessage(hWnd, WM_IEVIEW_COMMAND, lc_ieview_paste, 0);
 				break;*/
 			case TBB_SEARCH:
-				if(browser_host->mFocusType==fctQuickView)
-					SetFocus(hWnd);
-				SendMessage(hWnd, WM_KEYDOWN, VK_F3, 0);
-				//SendMessage(hWnd, WM_IEVIEW_SEARCH, 0, 0);
+				if (lParam == (LPARAM)toolbar)
+				{
+					if(browser_host->mFocusType==fctQuickView)
+						SetFocus(hWnd);
+					SendMessage(hWnd, WM_KEYDOWN, VK_F3, 0);
+				}
 				break;
 			case TBB_TRANSLATE:
 				browser_host->ExecuteScript(L"if(window.__mdv_gt_load) window.__mdv_gt_load();");
@@ -945,21 +1062,37 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 HWND Create_Toolbar(HWND ListWin)
 {
+	if (img_list && gTranslateToolbarImageIndex < 0)
+	{
+		HICON icon32 = LoadTranslateIcon32();
+		if (icon32)
+		{
+			HICON icon24 = (HICON)CopyImage(icon32, IMAGE_ICON, 24, 24, 0);
+			if (!icon24)
+				icon24 = icon32;
+			int idx = ImageList_AddIcon(img_list, icon24);
+			if (icon24 != icon32)
+				DestroyIcon(icon24);
+			if (idx >= 0)
+				gTranslateToolbarImageIndex = idx;
+		}
+	}
+
 	TBBUTTON tb_buttons[] = 
 	{
 		{0, TBB_BACK,		TBSTATE_ENABLED, BTNS_BUTTON, NULL},
 		{1, TBB_FORWARD,	TBSTATE_ENABLED, BTNS_BUTTON, NULL},
 		{2, TBB_STOP,		TBSTATE_ENABLED, BTNS_BUTTON, NULL},
 		{3, TBB_REFRESH,	TBSTATE_ENABLED, BTNS_BUTTON, NULL},
-		{6, 0,				TBSTATE_ENABLED, BTNS_SEP,	  NULL},
+		{4, 0,				TBSTATE_ENABLED, BTNS_SEP,	  NULL},
 		{5, TBB_COPY,		TBSTATE_ENABLED, BTNS_BUTTON, NULL},
 		//{6, TBB_PASTE,		TBSTATE_ENABLED, BTNS_BUTTON, NULL},
-		{6, 0,				TBSTATE_ENABLED, BTNS_SEP,	  NULL},
+		{4, 0,				TBSTATE_ENABLED, BTNS_SEP,	  NULL},
 		{4, TBB_PRINT,		TBSTATE_ENABLED, BTNS_BUTTON, NULL},
-		{6, 0,				TBSTATE_ENABLED, BTNS_SEP,	  NULL},
+		{4, 0,				TBSTATE_ENABLED, BTNS_SEP,	  NULL},
 		{7, TBB_SEARCH,		TBSTATE_ENABLED, BTNS_BUTTON, NULL},
-		{6, 0,				TBSTATE_ENABLED, BTNS_SEP,	  NULL},
-			{I_IMAGENONE, TBB_TRANSLATE, TBSTATE_ENABLED, BTNS_BUTTON | BTNS_AUTOSIZE | BTNS_SHOWTEXT, NULL}
+		{4, 0,				TBSTATE_ENABLED, BTNS_SEP,	  NULL},
+		{gTranslateToolbarImageIndex >= 0 ? gTranslateToolbarImageIndex : I_IMAGENONE, TBB_TRANSLATE, gTranslateEnabled ? TBSTATE_ENABLED : 0, BTNS_BUTTON, NULL}
 	};
 	const int tb_count = (int)(sizeof(tb_buttons) / sizeof(tb_buttons[0]));
 	for (int i = 0; i < tb_count; i++)
@@ -970,24 +1103,22 @@ HWND Create_Toolbar(HWND ListWin)
 	if(strncmp(parent_class_name, "TFormViewUV", 11)==0)
 		tb_buttons[5].fsState = tb_buttons[6].fsState = tb_buttons[9].fsState = TBSTATE_HIDDEN;
 
-	HWND toolbar = CreateWindowEx(0, TOOLBARCLASSNAME, NULL, WS_CHILD|CCS_TOP|TBSTYLE_LIST|TBSTYLE_FLAT|TBSTYLE_TOOLTIPS, 0, 0, 0, 0, ListWin, NULL, hinst, NULL); 
+	HWND toolbar = CreateWindowEx(0, TOOLBARCLASSNAME, NULL, WS_CHILD | WS_CLIPSIBLINGS | CCS_TOP | CCS_NODIVIDER | TBSTYLE_FLAT | TBSTYLE_TOOLTIPS, 0, 0, 0, 0, ListWin, NULL, hinst, NULL); 
+	SetProp(ListWin, PROP_TOOLBAR, toolbar);
 	SendMessage(toolbar, TB_BUTTONSTRUCTSIZE, (WPARAM) sizeof(TBBUTTON), 0); 
 	SendMessage(toolbar, TB_SETIMAGELIST, 0, (LPARAM)img_list);
 	SendMessage(toolbar, TB_SETUNICODEFORMAT, TRUE, 0);
+	SendMessage(toolbar, TB_SETPADDING, 0, MAKELPARAM(0, 0));
 
 	SendMessage(toolbar, TB_ADDBUTTONS, (WPARAM)tb_count, (LPARAM)&tb_buttons);
-	{
-		TBBUTTONINFOW tbbi = { 0 };
-		tbbi.cbSize = sizeof(TBBUTTONINFOW);
-		tbbi.dwMask = TBIF_TEXT | TBIF_IMAGE;
-		tbbi.pszText = (LPWSTR)gTranslateUiTranslate.c_str();
-		tbbi.iImage = I_IMAGENONE;
-		SendMessageW(toolbar, TB_SETBUTTONINFOW, TBB_TRANSLATE, (LPARAM)&tbbi);
-		SendMessage(toolbar, TB_ENABLEBUTTON, TBB_TRANSLATE, MAKELPARAM(TRUE, 0));
-	}
 	SendMessage(toolbar, TB_AUTOSIZE, 0, 0);
 
 	ShowWindow(toolbar, SW_SHOW);
+	{
+		RECT rc{};
+		GetClientRect(ListWin, &rc);
+		SendMessage(ListWin, WM_SIZE, SIZE_RESTORED, MAKELPARAM(rc.right - rc.left, rc.bottom - rc.top));
+	}
 	return toolbar;
 }
 
@@ -1060,22 +1191,7 @@ void CleanupTempHtmlFile()
 
 void browser_show_file(CBrowserHost* browserHost, const char* filename, bool useDarkTheme)
 {
-	gTranslateEnabled = GetPrivateProfileInt("Translate", "Enabled", 0, options.IniFileName) != 0;
-	gTranslateAuto = GetPrivateProfileInt("Translate", "Auto", 0, options.IniFileName) != 0;
-	char targetBuf[16]{};
-	GetPrivateProfileString("Translate", "Target", "auto", targetBuf, (DWORD)sizeof(targetBuf), options.IniFileName);
-
-	std::string userLang = GetUserLangTagForTranslate();
-	InitTranslateUiStrings(userLang);
-
-	std::string target = targetBuf;
-	std::transform(target.begin(), target.end(), target.begin(), [](unsigned char c) { return (char)std::tolower(c); });
-	if (target.empty() || target == "auto")
-		target = userLang;
-	if (target.size() >= sizeof(gTranslateTargetLang))
-		target.resize(sizeof(gTranslateTargetLang) - 1);
-	memset(gTranslateTargetLang, 0, sizeof(gTranslateTargetLang));
-	memcpy(gTranslateTargetLang, target.c_str(), target.size());
+	InitTranslateSettings();
 
 	CHAR css[MAX_PATH];
 	GetModuleFileName(hinst, css, MAX_PATH);
@@ -1251,7 +1367,7 @@ HWND __stdcall ListLoad(HWND ParentWin, char* FileToLoad, int ShowFlags)
 	bool need_toolbar = (!qiuck_view&&(options.toolbar&1))||(qiuck_view&&(options.toolbar&2));
 	bool need_statusbar = (!qiuck_view&&(options.status&1))||(qiuck_view&&(options.status&2));
 	
-	ListWin = CreateWindow(MAIN_WINDOW_CLASS, "IEViewMainWindow", WS_VISIBLE|WS_CHILD|WS_CLIPCHILDREN, 0, 0, Rect.right, Rect.bottom, ParentWin, NULL, hinst, NULL);
+	ListWin = CreateWindow(MAIN_WINDOW_CLASS, "IEViewMainWindow", WS_VISIBLE | WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 0, 0, Rect.right, Rect.bottom, ParentWin, NULL, hinst, NULL);
 	if(!ListWin)
 		return NULL;
 	if( need_statusbar )
@@ -1366,6 +1482,16 @@ BOOL APIENTRY DllMain( HANDLE hModule, DWORD  reason_for_call, LPVOID lpReserved
 			UnhookWindowsHookEx(hook_keyb);
 		if(img_list)
 			ImageList_Destroy(img_list);
+		if (gTranslateIcon)
+		{
+			DestroyIcon(gTranslateIcon);
+			gTranslateIcon = NULL;
+		}
+		if (gGdiPlusToken != 0)
+		{
+			Gdiplus::GdiplusShutdown(gGdiPlusToken);
+			gGdiPlusToken = 0;
+		}
 	}
 	return TRUE;
 }
