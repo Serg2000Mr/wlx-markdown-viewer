@@ -4,8 +4,6 @@
 
 Плагин для просмотра Markdown файлов в Total Commander с современными возможностями и внешним видом как на GitHub.
 
-https://github.com/Serg2000Mr/wlx-markdown-viewer-github-style/releases/download/v1.2.0/wlx-markdown-viewer-github-style-release-v.1.2.zip
-
 ![Скриншот работы плагина](screenshot.png)
 
 ## ✨ Основные возможности
