@@ -233,7 +233,7 @@ public static class Lib
             sb.Append("</style>");
             if (diagramsEnabled)
             {
-                sb.AppendLine("<script src='https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js' defer></script>");
+                sb.AppendLine("<script src='https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js' integrity='sha256-Wo7JGCC9Va/vBJBoSJNpkQ5dbOcMgQOVLyfinT526Lw=' crossorigin='anonymous' defer></script>");
                 sb.AppendLine("<script>window.addEventListener('load',function(){if(window.mermaid){try{mermaid.initialize({startOnLoad:true,theme:'default'});}catch(e){}}});</script>");
             }
             sb.AppendLine("</head>");
