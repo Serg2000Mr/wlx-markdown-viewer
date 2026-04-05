@@ -246,6 +246,31 @@ bool CBrowserHost::CreateBrowser(HWND hParent)
 			}
 		}
 
+		// Forward keys from WebView2 to the plugin window so TC hotkeys (ESC, F3, etc.) work.
+		// WebView2 runs out-of-process, so WH_KEYBOARD hooks never see its keystrokes.
+		mWebViewController->add_AcceleratorKeyPressed(
+			Callback<ICoreWebView2AcceleratorKeyPressedEventHandler>(
+				[this](ICoreWebView2Controller* sender, ICoreWebView2AcceleratorKeyPressedEventArgs* args) -> HRESULT {
+					COREWEBVIEW2_KEY_EVENT_KIND kind;
+					args->get_KeyEventKind(&kind);
+					if (kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN &&
+						kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN)
+						return S_OK;
+
+					UINT key;
+					args->get_VirtualKey(&key);
+
+					CAtlString key_name = GetFullKeyName((WORD)key);
+					if (trans_hotkeys.find(key_name) && !GetCapture())
+					{
+						args->put_Handled(TRUE);
+						UINT msg = (kind == COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN) ? WM_SYSKEYDOWN : WM_KEYDOWN;
+						PostMessage(mParentWin, msg, key, 0);
+					}
+					return S_OK;
+				}).Get(),
+			nullptr);
+
 		UpdateFolderMapping(mCurrentFolder);
 		Resize();
 

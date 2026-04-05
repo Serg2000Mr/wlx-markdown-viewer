@@ -71,6 +71,7 @@ struct SOptions
 };
 extern SOptions options;
 extern HINSTANCE hinst;
+extern CSmallStringList trans_hotkeys;
 
 void InitOptions();
 void InitProc();
