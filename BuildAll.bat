@@ -25,7 +25,7 @@ copy bin\Release\Markdown-x64.dll pack\
 copy MarkdigNative\bin\Release\net8.0\win-x64\publish\MarkdigNative-x64.dll pack\
 
 pushd pack
-7z a -tzip ..\MarkdownViewGitHubStyle.zip *
+powershell -NoProfile -Command "Compress-Archive -Path '.\*' -DestinationPath '..\MarkdownViewGitHubStyle.zip' -Force"
 popd
 
 rd /s /q pack
