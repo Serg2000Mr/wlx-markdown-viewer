@@ -703,6 +703,7 @@ void InitProc()
 			OSVERSIONINFO osvi;
 			ZeroMemory(&osvi, sizeof(OSVERSIONINFO));
 			osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
+			#pragma warning(suppress: 4996)
 			GetVersionEx(&osvi);
 			toolbar_bpp = (osvi.dwMajorVersion>5||osvi.dwMajorVersion==5&&osvi.dwMinorVersion>=1)?1:0;
 		}
@@ -923,7 +924,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			bool alt_down = 0x20000000&lParam;
 			bool key_down = 0x80000000&lParam;
 			UINT Msg = key_down?(alt_down?WM_SYSKEYUP:WM_KEYUP):(alt_down?WM_SYSKEYDOWN:WM_KEYDOWN);
-			CAtlString key_name = GetFullKeyName(wParam);
+			CAtlString key_name = GetFullKeyName((WORD)wParam);
 			if(key_name=="Ctrl+Insert")
 				SendMessage(hWnd, WM_IEVIEW_COMMAND, lc_copy, 0);
 			if(browser_host->FormFocused())
@@ -936,7 +937,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				if(trans_hotkeys.find(key_name)&&!GetCapture()) 
 					SendMessage(hWnd, Msg, wParam, lParam);
 			}
-			browser_host->ProcessHotkey(Msg, wParam, lParam);
+			browser_host->ProcessHotkey(Msg, (DWORD)wParam, (DWORD)lParam);
 		}
 	}
 
@@ -1018,7 +1019,7 @@ void do_events()
 		result = ::GetMessage(&msg, NULL, 0, 0);
 		if (result == 0) // WM_QUIT
 		{
-			::PostQuitMessage(msg.wParam);
+			::PostQuitMessage((int)msg.wParam);
 			break;
 		}
 		else if (result == -1)
