@@ -22,7 +22,7 @@ copy Build\MarkdownView.ini pack\
 copy Build\css\*.css pack\css\
 copy bin\Release\MarkdownView.wlx64 pack\
 copy bin\Release\Markdown-x64.dll pack\
-copy MarkdigNative\bin\Release\net8.0\win-x64\publish\MarkdigNative-x64.dll pack\
+copy MarkdigNative\bin\Release\net8.0\win-x64\publish\MarkdigNative.dll pack\MarkdigNative-x64.dll
 
 pushd pack
 powershell -NoProfile -Command "Compress-Archive -Path '.\*' -DestinationPath '..\MarkdownViewGitHubStyle.zip' -Force"
