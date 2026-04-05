@@ -796,7 +796,7 @@ void CBrowserHost::ClearSearchHighlight()
 	CComQIPtr<IHighlightRenderingServices> hl_services(html_disp);
 	if(!hl_services)
 		return;
-	int segm_count = mSearchHighlightSegments.size();
+	int segm_count = (int)mSearchHighlightSegments.size();
 	for(int i=0;i<segm_count;++i)
 		if(mSearchHighlightSegments[i])
 			hl_services->RemoveSegment(mSearchHighlightSegments[i]);
@@ -898,7 +898,7 @@ bool CBrowserHost::HighlightStrings(CComBSTR search, long search_flags)
 		mSearchHighlightSegments.push_back(hl_segment);
 		if(GetTickCount()>last_status_update_time+500)
 		{
-			SetStatusText(GetSearchStatusString(mSearchHighlightSegments.size(), false));
+			SetStatusText(GetSearchStatusString((int)mSearchHighlightSegments.size(), false));
 			last_status_update_time = GetTickCount();
 		}
 		long t;
@@ -908,7 +908,7 @@ bool CBrowserHost::HighlightStrings(CComBSTR search, long search_flags)
 		if(!t)
 			break;
 	}
-	SetStatusText(GetSearchStatusString(mSearchHighlightSegments.size(), true), 1000);
+	SetStatusText(GetSearchStatusString((int)mSearchHighlightSegments.size(), true), 1000);
 	return true;
 }
 
@@ -1098,7 +1098,7 @@ bool CBrowserHost::FindText(CComBSTR search, long search_flags, bool backward)
 			{
 				SetStatusText(GetSearchStatusString(-1, false));
 				UpdateSearchHighlight();
-				SetStatusText(GetSearchStatusString(mSearchHighlightSegments.size(), true), 1000);
+				SetStatusText(GetSearchStatusString((int)mSearchHighlightSegments.size(), true), 1000);
 			}
 			SetCurrentSearchHighlight(txt_range);
 		}
@@ -1226,7 +1226,7 @@ void RefreshBrowser(); // defined in main()
 void CBrowserHost::ProcessHotkey(UINT Msg, DWORD Key, DWORD Info)
 {
 	char str_action[80];
-	CAtlString full_name = GetFullKeyName(Key);
+	CAtlString full_name = GetFullKeyName((WORD)Key);
 	if((full_name=="F3" || full_name=="Shift+F3") && IsSearchHighlightEnabled())
 	{
 		if (mWebBrowser)
@@ -1377,7 +1377,7 @@ STDMETHODIMP CBrowserHost::QueryInterface(REFIID riid, void ** ppvObject)
     if(ppvObject == NULL) 
 		return E_INVALIDARG;
     else if(riid == IID_IUnknown)
-        *ppvObject = (IUnknown*)this;
+        *ppvObject = static_cast<IDispatch*>(this);
     else if(riid == IID_IDispatch)
 		*ppvObject = (IDispatch*)this;
     else if(riid == IID_IOleClientSite)

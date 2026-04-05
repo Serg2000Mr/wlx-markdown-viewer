@@ -219,8 +219,8 @@ public static class Lib
 
             var pipeline = GetPipeline(extensions);
 
-            bool all = string.IsNullOrEmpty(extensions) || extensions.Contains("advanced", StringComparison.OrdinalIgnoreCase);
-            bool diagramsEnabled = all || extensions.Contains("diagrams", StringComparison.OrdinalIgnoreCase);
+            bool all = string.IsNullOrEmpty(extensions) || extensions!.Contains("advanced", StringComparison.OrdinalIgnoreCase);
+            bool diagramsEnabled = all || extensions!.Contains("diagrams", StringComparison.OrdinalIgnoreCase);
             string cssContent = GetCssContent(cssFile);
 
             var sb = new StringBuilder(source.Length + cssContent.Length + 2048);

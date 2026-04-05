@@ -189,11 +189,11 @@ void CSmallStringList::load_from_ini(const char* filename, const char* section, 
 		next_pos=strchr(str_pos+1, ';');
 		if(next_pos==NULL || next_pos==str_pos)
 			break;
-		*str_pos = next_pos-str_pos-1;
+		*str_pos = (char)(next_pos-str_pos-1);
 		str_pos = next_pos;
 	}
 	*str_pos = 0;
-	set_data((unsigned char*)buffer, str_pos-buffer+1);
+	set_data((unsigned char*)buffer, (int)(str_pos-buffer+1));
 }
 void CSmallStringList::load_sign_from_ini(const char* filename, const char* section, const char* key)
 {
@@ -211,27 +211,31 @@ void CSmallStringList::load_sign_from_ini(const char* filename, const char* sect
 			break;
 		if(*str_pos=='\"'&&*(next_pos-1)=='\"')
 		{
-			*list_pos = next_pos-str_pos-2;
+			*list_pos = (unsigned char)(next_pos-str_pos-2);
 			memcpy(list_pos+1, str_pos+1, *list_pos);
 			list_pos += *list_pos+1;
 		}
 		else
 		{
-			*list_pos = (next_pos-str_pos)/2;
+			*list_pos = (unsigned char)((next_pos-str_pos)/2);
 			for ( const char * s = str_pos; s<=next_pos-2; s += 2 )
-				sscanf(s, "%2x", ++list_pos);
+			{
+				unsigned int byte_val;
+				sscanf(s, "%2x", &byte_val);
+				*(++list_pos) = (unsigned char)byte_val;
+			}
 			++list_pos;
 		}
 		str_pos = next_pos+1;
 	}
 	*list_pos = 0;
-	set_data(list, list_pos-list+1);
+	set_data(list, (int)(list_pos-list+1));
 }
 bool CSmallStringList::find(const char* str)
 {
 	if(!valid())
 		return false;
-	int len = strlen(str);
+	int len = (int)strlen(str);
 	for(const unsigned char* str_pos = data; *str_pos; str_pos+=*str_pos+1)
 		if(*str_pos==len && !memcmp(str, str_pos+1, len))
 			return true;
@@ -262,7 +266,7 @@ bool CSmallStringList::check_signature(const char* filename, bool skip_spaces)
 				}
 			}
 		}
-		num_read = fread(buf, sizeof(unsigned char), *str_pos, file);
+		num_read = (int)fread(buf, sizeof(unsigned char), *str_pos, file);
 		if(num_read==*str_pos && !memicmp(buf, str_pos+1, *str_pos))
 		{
 			fclose(file);
