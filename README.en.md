@@ -101,10 +101,13 @@ Note: the C++ projects use Platform Toolset `v145`. If you have a different tool
 BuildAll.bat
 
 # Or build individually:
-# 1. Build .NET AOT component
-dotnet publish MarkdigNative/MarkdigNative.csproj -c Release
+# 1. Restore NuGet packages (WebView2 SDK)
+msbuild MarkdownView.sln -t:Restore
 
-# 2. Build C++ components
+# 2. Build .NET AOT component
+dotnet publish MarkdigNative/MarkdigNative.csproj -c Release -r win-x64
+
+# 3. Build C++ components
 msbuild MarkdownView.sln /p:Configuration=Release /p:Platform=x64
 ```
 

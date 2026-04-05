@@ -115,10 +115,13 @@ Target=auto
 BuildAll.bat
 
 # Или сборка по отдельности:
-# 1. Сборка .NET AOT компонента
-dotnet publish MarkdigNative/MarkdigNative.csproj -c Release
+# 1. Восстановление NuGet-пакетов (WebView2 SDK)
+msbuild MarkdownView.sln -t:Restore
 
-# 2. Сборка C++ компонентов
+# 2. Сборка .NET AOT компонента
+dotnet publish MarkdigNative/MarkdigNative.csproj -c Release -r win-x64
+
+# 3. Сборка C++ компонентов
 msbuild MarkdownView.sln /p:Configuration=Release /p:Platform=x64
 ```
 
