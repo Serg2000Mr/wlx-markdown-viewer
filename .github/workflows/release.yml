@@ -20,26 +20,8 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Restore NuGet packages
-        run: msbuild MarkdownView.sln -t:Restore
-
-      - name: Build MarkdigNative (Native AOT x64)
-        run: dotnet publish MarkdigNative/MarkdigNative.csproj -c Release -r win-x64
-
-      - name: Build C++ components (x64)
-        run: msbuild MarkdownView.sln /p:Configuration=Release /p:Platform=x64
-
-      - name: Pack plugin
-        shell: bash
-        run: |
-          mkdir -p pack/css
-          cp Build/pluginst.inf pack/
-          cp Build/MarkdownView.ini pack/
-          cp Build/css/*.css pack/css/
-          cp bin/Release/MarkdownView.wlx64 pack/
-          cp bin/Release/Markdown-x64.dll pack/
-          cp MarkdigNative/bin/Release/net8.0/win-x64/publish/MarkdigNative-x64.dll pack/
-          cd pack && 7z a -tzip ../MarkdownViewGitHubStyle.zip *
+      - name: Build and pack
+        run: BuildAll.bat
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
