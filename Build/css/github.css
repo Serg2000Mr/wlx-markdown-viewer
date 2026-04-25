@@ -71,18 +71,46 @@ h6 {
   font-size: 0.85em;
   color: #59636e;
 }
+/* YAML frontmatter table — GitHub-style metadata block */
+.markdown-frontmatter {
+  border: 1px solid #d1d9e0;
+  border-radius: 6px;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin-bottom: 16px;
+  overflow: hidden;
+  font-size: 14px;
+}
+.markdown-frontmatter th {
+  background: #f6f8fa;
+  padding: 8px 16px;
+  text-align: left;
+  font-weight: 600;
+  border-right: 1px solid #d1d9e0;
+  vertical-align: top;
+  white-space: nowrap;
+  color: #1f2328;
+}
+.markdown-frontmatter td {
+  padding: 8px 16px;
+  border-top: 1px solid #d1d9e0;
+  word-break: break-word;
+}
+.markdown-frontmatter tr:first-child td,
+.markdown-frontmatter tr:first-child th {
+  border-top: none;
+}
 /* GitHub-like heading anchor icon:
    - hidden by default (only appears on hover, like on GitHub)
    - dark on hover (not blue)
-   - positioned INSIDE heading so it never goes beyond left edge */
+   - positioned OUTSIDE heading (in body's left padding) so heading text aligns with body */
 h1[id], h2[id], h3[id], h4[id], h5[id], h6[id] {
   position: relative;
-  padding-left: 20px;
 }
 h1[id]::before, h2[id]::before, h3[id]::before, h4[id]::before, h5[id]::before, h6[id]::before {
   content: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' width='16' height='16'%3E%3Cpath fill='%231f2328' d='M7.775 3.275a.75.75 0 001.06 1.06l1.25-1.25a2 2 0 112.83 2.83l-2.5 2.5a2 2 0 01-2.83 0 .75.75 0 00-1.06 1.06 3.5 3.5 0 004.95 0l2.5-2.5a3.5 3.5 0 00-4.95-4.95l-1.25 1.25zm-4.69 9.64a2 2 0 010-2.83l2.5-2.5a2 2 0 012.83 0 .75.75 0 001.06-1.06 3.5 3.5 0 00-4.95 0l-2.5 2.5a3.5 3.5 0 004.95 4.95l1.25-1.25a.75.75 0 00-1.06-1.06l-1.25 1.25a2 2 0 01-2.83 0z'/%3E%3C/svg%3E");
   position: absolute;
-  left: 0;
+  left: -20px;
   top: 0;
   width: 16px;
   height: 1.25em;
