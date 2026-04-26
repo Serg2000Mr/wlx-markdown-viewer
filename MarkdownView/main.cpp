@@ -235,6 +235,7 @@ namespace {
 
 	bool gTranslateEnabled = false;
 	bool gTranslateAuto = false;
+	bool gFastFontButtonEnabled = true;
 	char gTranslateTargetLang[16]{};
 	bool gSyntaxHighlightEnabled = true;
 	std::wstring gTranslateUiTranslate = L"Translate";
@@ -277,6 +278,24 @@ namespace {
 			return code;
 		}
 		return "en";
+	}
+
+	static void InitFastFontSettings()
+	{
+		gFastFontButtonEnabled = GetPrivateProfileInt("FastFont", "Enabled", 1, options.IniFileName) != 0;
+	}
+
+	static const wchar_t* GetFastFontTooltip()
+	{
+		std::string lang = GetUserLangTagForTranslate();
+		if (lang == "ru")    return L"Режим бионического шрифта для быстрого чтения";
+		if (lang == "zh-CN") return L"用于快速阅读的仿生字体模式";
+		if (lang == "zh-TW") return L"用於快速閱讀的仿生字體模式";
+		if (lang == "es")    return L"Modo de fuente biónica para lectura rápida";
+		if (lang == "hi")    return L"तेज़ पढ़ने के लिए बायोनिक फ़ॉन्ट मोड";
+		if (lang == "ar")    return L"وضع الخط البيوني للقراءة السريعة";
+		if (lang == "pt")    return L"Modo de fonte biônica para leitura rápida";
+		return L"Bionic font mode for speed reading";
 	}
 
 	static void InitTranslateUiStrings(const std::string& langTag)
@@ -912,6 +931,7 @@ void InitProc()
 	GetPrivateProfileString("Renderer", "CustomCSSDark", "", &html_template_dark[0], 512, options.IniFileName);
 	InitTranslateSettings();
 	InitSyntaxHighlightSettings();
+	InitFastFontSettings();
 	if (img_list && gTranslateToolbarImageIndex < 0)
 	{
 		HICON icon32 = LoadTranslateIcon32();
@@ -1092,6 +1112,20 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			}
 		}
 	}
+	else if(message==WM_NOTIFY)
+	{
+		LPNMHDR hdr = (LPNMHDR)lParam;
+		if (hdr && hdr->code == TBN_GETINFOTIPW)
+		{
+			LPNMTBGETINFOTIPW tip = (LPNMTBGETINFOTIPW)lParam;
+			if (tip->iItem == TBB_FASTFONT && tip->pszText && tip->cchTextMax > 0)
+			{
+				const wchar_t* text = GetFastFontTooltip();
+				wcsncpy_s(tip->pszText, tip->cchTextMax, text, _TRUNCATE);
+				return 0;
+			}
+		}
+	}
 	else if(message==WM_IEVIEW_SEARCH||message==WM_IEVIEW_SEARCHW)
 	{
 		CBrowserHost* browser_host = (CBrowserHost*)GetProp(hWnd ,PROP_BROWSER);
@@ -1231,6 +1265,12 @@ HWND Create_Toolbar(HWND ListWin)
 	if(strncmp(parent_class_name, "TFormViewUV", 11)==0)
 		tb_buttons[5].fsState = tb_buttons[6].fsState = tb_buttons[9].fsState = TBSTATE_HIDDEN;
 
+	// Кнопка бионического шрифта скрывается, если в ini выставлено [FastFont] Enabled=0.
+	// Скрываем и кнопку (индекс 11), и идущий за ней разделитель (12), чтобы между
+	// поиском и Translate не оставалось двух разделителей подряд.
+	if (!gFastFontButtonEnabled)
+		tb_buttons[11].fsState = tb_buttons[12].fsState = TBSTATE_HIDDEN;
+
 	HWND toolbar = CreateWindowEx(0, TOOLBARCLASSNAME, NULL, WS_CHILD | WS_CLIPSIBLINGS | CCS_TOP | CCS_NODIVIDER | TBSTYLE_FLAT | TBSTYLE_TOOLTIPS, 0, 0, 0, 0, ListWin, NULL, hinst, NULL); 
 	SetProp(ListWin, PROP_TOOLBAR, toolbar);
 	SendMessage(toolbar, TB_BUTTONSTRUCTSIZE, (WPARAM) sizeof(TBBUTTON), 0); 
@@ -1324,6 +1364,7 @@ void CleanupTempHtmlFile()
 void browser_show_file(CBrowserHost* browserHost, const char* filename, bool useDarkTheme)
 {
 	InitTranslateSettings();
+	InitFastFontSettings();
 	DebugLog("main.cpp:browser_show_file", useDarkTheme ? "dark=1" : "dark=0");
 	InitSyntaxHighlightSettings();
 
