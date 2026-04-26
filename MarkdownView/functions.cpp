@@ -6,146 +6,15 @@
 #include "functions.h"
 #include <cstdio>
 #include <mutex>
+#include <strsafe.h>
 
 HINSTANCE hinst = NULL;
 
 SOptions options = {false, 0, 0, 0, 0, 0, "", ""};
-LARGE_INTEGER LogFirstCount = {0};
-static std::mutex gLogMutex;
-static std::wstring gLogFilePath;
-
-static bool EndsWithCi(const std::wstring& s, const std::wstring& suffix)
-{
-	if (s.size() < suffix.size())
-		return false;
-
-	size_t start = s.size() - suffix.size();
-	for (size_t i = 0; i < suffix.size(); i++)
-	{
-		wchar_t a = s[start + i];
-		wchar_t b = suffix[i];
-		if (a >= L'A' && a <= L'Z')
-			a = (wchar_t)(a - L'A' + L'a');
-		if (b >= L'A' && b <= L'Z')
-			b = (wchar_t)(b - L'A' + L'a');
-		if (a != b)
-			return false;
-	}
-	return true;
-}
-
-static std::wstring DirNameOfPath(const std::wstring& fullPath)
-{
-	size_t slash = fullPath.find_last_of(L"\\/");
-	if (slash == std::wstring::npos)
-		return L"";
-	return fullPath.substr(0, slash);
-}
-
-static std::wstring GetPrimaryLogRoot()
-{
-	wchar_t modulePath[MAX_PATH] = {0};
-	if (hinst && GetModuleFileNameW(hinst, modulePath, MAX_PATH))
-	{
-		std::wstring moduleDir = DirNameOfPath(modulePath);
-		std::wstring lower = moduleDir;
-		for (auto& ch : lower)
-			if (ch >= L'A' && ch <= L'Z')
-				ch = (wchar_t)(ch - L'A' + L'a');
-
-		const std::wstring binRelease = L"\\bin\\release";
-		const std::wstring binDebug = L"\\bin\\debug";
-		if (EndsWithCi(lower, binRelease))
-		{
-			std::wstring root = moduleDir.substr(0, moduleDir.size() - binRelease.size());
-			if (!root.empty() && (root.back() == L'\\' || root.back() == L'/'))
-				root.pop_back();
-			return root;
-		}
-		if (EndsWithCi(lower, binDebug))
-		{
-			std::wstring root = moduleDir.substr(0, moduleDir.size() - binDebug.size());
-			if (!root.empty() && (root.back() == L'\\' || root.back() == L'/'))
-				root.pop_back();
-			return root;
-		}
-
-		return moduleDir;
-	}
-
-	wchar_t cwd[MAX_PATH] = {0};
-	if (GetCurrentDirectoryW(MAX_PATH, cwd))
-		return std::wstring(cwd);
-
-	return L".";
-}
-
-static std::wstring GetFallbackLogRoot()
-{
-	wchar_t buf[MAX_PATH] = {0};
-	DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
-	if (n > 0 && n < MAX_PATH)
-	{
-		std::wstring dir = std::wstring(buf) + L"\\TotalCommanderMarkdownViewPlugin";
-		CreateDirectoryW(dir.c_str(), NULL);
-		return dir;
-	}
-
-	wchar_t tmp[MAX_PATH] = {0};
-	if (GetTempPathW(MAX_PATH, tmp))
-	{
-		std::wstring dir = std::wstring(tmp) + L"TotalCommanderMarkdownViewPlugin";
-		CreateDirectoryW(dir.c_str(), NULL);
-		return dir;
-	}
-
-	return L".";
-}
-
-static std::wstring EnsureLogFilePath()
-{
-	if (!gLogFilePath.empty())
-		return gLogFilePath;
-
-	std::wstring primary = GetPrimaryLogRoot();
-	std::wstring candidate = primary;
-	if (!candidate.empty() && candidate.back() != L'\\' && candidate.back() != L'/')
-		candidate += L"\\";
-	candidate += L"mdv_translate.log";
-
-	FILE* f = nullptr;
-	if (_wfopen_s(&f, candidate.c_str(), L"ab") == 0 && f)
-	{
-		fclose(f);
-		gLogFilePath = candidate;
-		return gLogFilePath;
-	}
-	if (f)
-		fclose(f);
-
-	std::wstring fallback = GetFallbackLogRoot();
-	candidate = fallback;
-	if (!candidate.empty() && candidate.back() != L'\\' && candidate.back() != L'/')
-		candidate += L"\\";
-	candidate += L"mdv_translate.log";
-
-	gLogFilePath = candidate;
-	return gLogFilePath;
-}
-
-static void AppendLogUtf8Line(const std::string& lineUtf8)
-{
-	std::lock_guard<std::mutex> lock(gLogMutex);
-
-	std::wstring path = EnsureLogFilePath();
-	FILE* f = nullptr;
-	if (_wfopen_s(&f, path.c_str(), L"ab") != 0 || !f)
-		return;
-
-	fwrite(lineUtf8.data(), 1, lineUtf8.size(), f);
-	fwrite("\r\n", 1, 2, f);
-	fclose(f);
-}
+static bool gDebugLogEnabled = false;
+static std::mutex gDebugLogMutex;
+static bool gFallbackLogPathInitialized = false;
+static char gFallbackLogPath[MAX_PATH] = {};
 
 //					   #--------------------#
 //				 	   |		            |
@@ -163,12 +32,12 @@ void CSmallStringList::clear()
 		delete[] data;
 	data = NULL;
 }
-void CSmallStringList::set_size(int size)
+void CSmallStringList::set_size(size_t size)
 {
 	clear();
 	data = new unsigned char[size];
 }
-void CSmallStringList::set_data(const unsigned char* buffer, int size)
+void CSmallStringList::set_data(const unsigned char* buffer, size_t size)
 {
 	set_size(size);
 	memcpy(data, buffer, size);
@@ -181,7 +50,25 @@ void CSmallStringList::load_from_ini(const char* filename, const char* section, 
 {
 	char buffer[512];
 	GetPrivateProfileString(section, key, "", buffer+1, sizeof(buffer)-1, filename);
-	strcat(buffer+1, ";");
+	{
+		char* s = buffer + 1;
+		size_t cap = sizeof(buffer) - 1;
+		size_t len = strnlen_s(s, cap);
+		if (len + 1 < cap)
+		{
+			s[len] = ';';
+			s[len + 1] = '\0';
+		}
+		else if (cap >= 2)
+		{
+			s[cap - 2] = ';';
+			s[cap - 1] = '\0';
+		}
+		else if (cap >= 1)
+		{
+			s[cap - 1] = '\0';
+		}
+	}
 	char* next_pos;
 	char* str_pos = buffer;
 	while(true)
@@ -189,18 +76,41 @@ void CSmallStringList::load_from_ini(const char* filename, const char* section, 
 		next_pos=strchr(str_pos+1, ';');
 		if(next_pos==NULL || next_pos==str_pos)
 			break;
-		*str_pos = next_pos-str_pos-1;
+		ptrdiff_t seg_len = next_pos - str_pos - 1;
+		if (seg_len < 0)
+			seg_len = 0;
+		if (seg_len > 255)
+			seg_len = 255;
+		*str_pos = (char)(unsigned char)seg_len;
 		str_pos = next_pos;
 	}
 	*str_pos = 0;
-	set_data((unsigned char*)buffer, str_pos-buffer+1);
+	set_data((unsigned char*)buffer, (size_t)(str_pos - buffer + 1));
 }
 void CSmallStringList::load_sign_from_ini(const char* filename, const char* section, const char* key)
 {
 	char buffer[512];
 	unsigned char list[512];
 	GetPrivateProfileString(section, key, "", buffer, sizeof(buffer), filename);
-	strcat(buffer, ";");
+	{
+		char* s = buffer;
+		size_t cap = sizeof(buffer);
+		size_t len = strnlen_s(s, cap);
+		if (len + 1 < cap)
+		{
+			s[len] = ';';
+			s[len + 1] = '\0';
+		}
+		else if (cap >= 2)
+		{
+			s[cap - 2] = ';';
+			s[cap - 1] = '\0';
+		}
+		else if (cap >= 1)
+		{
+			s[cap - 1] = '\0';
+		}
+	}
 	char* next_pos;
 	char* str_pos = buffer;
 	unsigned char* list_pos = list;
@@ -211,29 +121,49 @@ void CSmallStringList::load_sign_from_ini(const char* filename, const char* sect
 			break;
 		if(*str_pos=='\"'&&*(next_pos-1)=='\"')
 		{
-			*list_pos = next_pos-str_pos-2;
+			ptrdiff_t raw_len = next_pos - str_pos - 2;
+			if (raw_len < 0)
+				raw_len = 0;
+			if (raw_len > 255)
+				raw_len = 255;
+			*list_pos = (unsigned char)raw_len;
 			memcpy(list_pos+1, str_pos+1, *list_pos);
 			list_pos += *list_pos+1;
 		}
 		else
 		{
-			*list_pos = (next_pos-str_pos)/2;
-			for ( const char * s = str_pos; s<=next_pos-2; s += 2 )
-				sscanf(s, "%2x", ++list_pos);
-			++list_pos;
+			ptrdiff_t raw_count = (next_pos - str_pos) / 2;
+			if (raw_count < 0)
+				raw_count = 0;
+			if (raw_count > 255)
+				raw_count = 255;
+			unsigned char byte_count = (unsigned char)raw_count;
+			*list_pos = byte_count;
+			const char* s = str_pos;
+			for (unsigned int i = 0; i < byte_count; i++)
+			{
+				unsigned int value = 0;
+				if (sscanf(s, "%2x", &value) != 1)
+					value = 0;
+				list_pos[1 + i] = (unsigned char)value;
+				s += 2;
+			}
+			list_pos += byte_count + 1;
 		}
 		str_pos = next_pos+1;
 	}
 	*list_pos = 0;
-	set_data(list, list_pos-list+1);
+	set_data(list, (size_t)(list_pos - list + 1));
 }
 bool CSmallStringList::find(const char* str)
 {
 	if(!valid())
 		return false;
-	int len = strlen(str);
+	size_t len = strlen(str);
+	if (len > 255)
+		return false;
 	for(const unsigned char* str_pos = data; *str_pos; str_pos+=*str_pos+1)
-		if(*str_pos==len && !memcmp(str, str_pos+1, len))
+		if(*str_pos == (unsigned char)len && !memcmp(str, str_pos+1, len))
 			return true;
 	return false;
 }
@@ -245,7 +175,7 @@ bool CSmallStringList::check_signature(const char* filename, bool skip_spaces)
 	if(file==NULL)
 		return false;
 	unsigned char* buf = new unsigned char[256];
-	int num_read;
+	size_t num_read;
 	for(const unsigned char* str_pos = data; *str_pos; str_pos+=*str_pos+1)
 	{
 		fseek(file, 0, SEEK_SET);
@@ -263,7 +193,7 @@ bool CSmallStringList::check_signature(const char* filename, bool skip_spaces)
 			}
 		}
 		num_read = fread(buf, sizeof(unsigned char), *str_pos, file);
-		if(num_read==*str_pos && !memicmp(buf, str_pos+1, *str_pos))
+		if(num_read == (size_t)*str_pos && !memicmp(buf, str_pos+1, *str_pos))
 		{
 			fclose(file);
 			return true;
@@ -283,7 +213,15 @@ void InitOptions()
 {
 	GetModuleFileName(hinst, options.IniFileName, sizeof(options.IniFileName));
 	char* dot = strrchr(options.IniFileName, '.');
-	strcpy(dot, ".ini");
+	if (dot)
+	{
+		size_t remaining = ARRAYSIZE(options.IniFileName) - (size_t)(dot - options.IniFileName);
+		StringCchCopyA(dot, remaining, ".ini");
+	}
+	else
+	{
+		StringCchCatA(options.IniFileName, ARRAYSIZE(options.IniFileName), ".ini");
+	}
 
 	BOOL ini_exists = PathFileExists(options.IniFileName);
 	if(!ini_exists)
@@ -294,8 +232,19 @@ void InitOptions()
 	}
 
 
-	strcpy(options.LogIniFileName, options.IniFileName);
-	strcpy(options.LogIniFileName+(dot-options.IniFileName), "_Log.ini");
+	StringCchCopyA(options.LogIniFileName, ARRAYSIZE(options.LogIniFileName), options.IniFileName);
+	{
+		char* logDot = strrchr(options.LogIniFileName, '.');
+		if (logDot)
+		{
+			size_t remaining = ARRAYSIZE(options.LogIniFileName) - (size_t)(logDot - options.LogIniFileName);
+			StringCchCopyA(logDot, remaining, "_Log.ini");
+		}
+		else
+		{
+			StringCchCatA(options.LogIniFileName, ARRAYSIZE(options.LogIniFileName), "_Log.ini");
+		}
+	}
 
 	options.flags = 0;
 	char temp[10];
@@ -350,6 +299,8 @@ void InitOptions()
 	if(GetPrivateProfileInt("options", "Silent", 1, options.IniFileName))
 			options.dlcontrol |= DLCTL_SILENT;
 	options.valid = true;
+
+	gDebugLogEnabled = GetPrivateProfileInt("Debug", "Log", 0, options.IniFileName) ? true : false;
 }
 
 //						  #-------------#
@@ -498,26 +449,113 @@ std::string WideToUtf8(const std::wstring& wide)
     return strTo;
 }
 
+static void DebugLogAppendLineLocked(const char* line)
+{
+	if (!line || !line[0])
+		return;
+
+	constexpr long long kMaxBytes = 1024LL * 1024LL;
+
+	auto ensureFallbackPath = []() {
+		if (gFallbackLogPathInitialized)
+			return;
+		gFallbackLogPathInitialized = true;
+
+		char tempDir[MAX_PATH] = {};
+		DWORD n = GetTempPathA(ARRAYSIZE(tempDir), tempDir);
+		if (n == 0 || n >= ARRAYSIZE(tempDir))
+			return;
+
+		StringCchPrintfA(gFallbackLogPath, ARRAYSIZE(gFallbackLogPath), "%sMarkdownViewGitHubStyle_Log.txt", tempDir);
+	};
+
+	auto maybeRotate = [kMaxBytes](const char* path) {
+		if (!path || !path[0])
+			return;
+		HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (h == INVALID_HANDLE_VALUE)
+			return;
+		LARGE_INTEGER sz{};
+		if (GetFileSizeEx(h, &sz) && sz.QuadPart > kMaxBytes)
+		{
+			CloseHandle(h);
+			DeleteFileA(path);
+			return;
+		}
+		CloseHandle(h);
+	};
+
+	const char* primaryPath = options.LogIniFileName[0] ? options.LogIniFileName : nullptr;
+	if (primaryPath)
+		maybeRotate(primaryPath);
+
+	FILE* f = primaryPath ? fopen(primaryPath, "ab") : nullptr;
+	if (!f)
+	{
+		ensureFallbackPath();
+		if (gFallbackLogPath[0])
+		{
+			maybeRotate(gFallbackLogPath);
+			f = fopen(gFallbackLogPath, "ab");
+		}
+	}
+	if (!f)
+		return;
+	fwrite(line, 1, strlen(line), f);
+	fwrite("\r\n", 1, 2, f);
+	fclose(f);
+}
+
+void DebugLog(const char* location, const char* message)
+{
+	if (!gDebugLogEnabled)
+		return;
+
+	SYSTEMTIME st{};
+	GetLocalTime(&st);
+	DWORD pid = GetCurrentProcessId();
+	DWORD tid = GetCurrentThreadId();
+
+	char line[2048]{};
+	StringCchPrintfA(
+		line, ARRAYSIZE(line),
+		"%04u-%02u-%02u %02u:%02u:%02u.%03u pid=%lu tid=%lu %s | %s",
+		st.wYear, st.wMonth, st.wDay,
+		st.wHour, st.wMinute, st.wSecond, st.wMilliseconds,
+		(unsigned long)pid, (unsigned long)tid,
+		location ? location : "",
+		message ? message : ""
+	);
+
+	std::lock_guard<std::mutex> lock(gDebugLogMutex);
+	OutputDebugStringA(line);
+	OutputDebugStringA("\r\n");
+	DebugLogAppendLineLocked(line);
+}
+
+void DebugLogW(const char* location, const wchar_t* message)
+{
+	std::string utf8 = message ? WideToUtf8(std::wstring(message)) : std::string();
+	DebugLog(location, utf8.c_str());
+}
+
+void DebugLogBytes(const char* location, const void* data, size_t len)
+{
+	if (!gDebugLogEnabled)
+		return;
+
+	(void)data;
+	char msg[64]{};
+	StringCchPrintfA(msg, ARRAYSIZE(msg), "bytes len=%u", (unsigned int)len);
+	DebugLog(location, msg);
+}
+
 HWND GetBrowserHostWnd(HWND child_hwnd)
 {
 	for(HWND hWnd=child_hwnd;hWnd;hWnd=GetParent(hWnd))
 		if(GetProp(hWnd,PROP_BROWSER))
 			return hWnd;
 	return NULL;
-}
-
-void DebugLog(const char* location, const char* message, const char* hypothesisId)
-{
-	(void)location;
-	(void)message;
-	(void)hypothesisId;
-}
-
-void DebugLogW(const char* location, const wchar_t* message, const char* hypothesisId)
-{
-	(void)location;
-	(void)message;
-	(void)hypothesisId;
 }
 /*
 CBrowserHost* GetBrowserHost(HWND child_hwnd)
@@ -532,32 +570,6 @@ CBrowserHost* GetBrowserHost(HWND child_hwnd)
 	return NULL;
 }
 */
-
-//							#-----------#
-//  						|	  	    |
-//**************************|    Log    |***************************
-//							|		    |
-//							#-----------#
-
-int Log(char* Section, char* Text)
-{
-	(void)Section;
-	(void)Text;
-	return 0;
-}
-void LogTimeReset()
-{
-	return;
-}
-
-void LogTime(char* Text)
-{
-	(void)Text;
-}
-void LogTime(int number)
-{
-	(void)number;
-}
 
 void DisplayLastError(void)
 {

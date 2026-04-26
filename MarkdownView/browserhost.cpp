@@ -6,6 +6,7 @@
 #include <mshtmdid.h>
 #include <comutil.h>
 #include <shlobj.h>
+#include <strsafe.h>
 
 #include <vector>
 #include "browserhost.h"
@@ -22,6 +23,26 @@ static bool IsTempPreviewFilePath(const std::wstring& path)
 	if (!filename || !filename[0])
 		return false;
 	return _wcsicmp(filename, L"_markdown_preview_temp.html") == 0;
+}
+
+static bool IsInternalUri(const std::wstring& uri)
+{
+	if (uri.empty())
+		return false;
+
+	if (_wcsnicmp(uri.c_str(), L"data:text/html", 14) == 0)
+		return true;
+	if (_wcsnicmp(uri.c_str(), L"about:blank", 10) == 0)
+		return true;
+	if (_wcsnicmp(uri.c_str(), L"file:", 5) == 0)
+		return true;
+
+	wchar_t host[256]{};
+	DWORD cchHost = ARRAYSIZE(host);
+	if (SUCCEEDED(UrlGetPartW(uri.c_str(), host, &cchHost, URL_PART_HOSTNAME, 0)) && host[0])
+		return _wcsicmp(host, L"markdown.internal") == 0;
+
+	return false;
 }
 
 CBrowserHost::CBrowserHost() :
@@ -221,15 +242,12 @@ bool CBrowserHost::CreateBrowser(HWND hParent)
 		mWebView->add_NavigationStarting(
 			Callback<ICoreWebView2NavigationStartingEventHandler>(
 				[this](ICoreWebView2* sender, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
-					LPWSTR uri;
-					args->get_Uri(&uri);
+					LPWSTR uri = nullptr;
+					if (FAILED(args->get_Uri(&uri)) || !uri)
+						return S_OK;
 					std::wstring wUri = uri;
 
-					// If it's not our internal page or internal resource, open in default browser
-					bool isInternal = (wUri.find(L"markdown.internal") != std::wstring::npos) ||
-						(wUri.find(L"data:text/html") == 0) ||
-						(wUri.find(L"about:blank") == 0) ||
-						(wUri.find(L"file:") == 0);
+					bool isInternal = IsInternalUri(wUri);
 
 					BOOL isUserInitiated = FALSE;
 					args->get_IsUserInitiated(&isUserInitiated);
@@ -284,9 +302,15 @@ bool CBrowserHost::CreateBrowser(HWND hParent)
 					CComQIPtr<ICoreWebView2_3> webView3 = mWebView;
 					if (webView3) {
 						wchar_t folder[MAX_PATH];
-						wcscpy(folder, url.c_str());
-						PathRemoveFileSpecW(folder);
-						UpdateFolderMapping(folder);
+						if (SUCCEEDED(StringCchCopyW(folder, ARRAYSIZE(folder), url.c_str())))
+						{
+							PathRemoveFileSpecW(folder);
+							UpdateFolderMapping(folder);
+						}
+						else
+						{
+							UpdateFolderMapping(L"");
+						}
 
 						if (mFolderMappingEnabled) {
 							std::wstring filename = PathFindFileNameW(url.c_str());
@@ -450,14 +474,16 @@ void CBrowserHost::Navigate(const wchar_t* url)
 			}
 			else {
 				wchar_t folder[MAX_PATH];
-				wcscpy(folder, finalUrl.c_str());
-				PathRemoveFileSpecW(folder);
+				if (SUCCEEDED(StringCchCopyW(folder, ARRAYSIZE(folder), finalUrl.c_str())))
+					PathRemoveFileSpecW(folder);
+				else
+					folder[0] = L'\0';
 
 				// VirtualHostNameToFolderMapping доступен только начиная с ICoreWebView2_3.
 				// Если интерфейса нет (старый runtime) — уходим на file:// навигацию.
 				CComQIPtr<ICoreWebView2_3> webView3 = mWebView;
 				if (webView3) {
-					UpdateFolderMapping(folder);
+					UpdateFolderMapping(folder[0] ? folder : L"");
 
 					if (mFolderMappingEnabled) {
 						std::wstring filename = PathFindFileNameW(finalUrl.c_str());
@@ -680,10 +706,13 @@ void CBrowserHost::SavePosition()
 	SysFreeString(loc_wide);
 
 	char ini_path[512];
-	strcpy(ini_path, options.IniFileName);
+	StringCchCopyA(ini_path, ARRAYSIZE(ini_path), options.IniFileName);
 	char* last_slash = strrchr(ini_path, '\\');
 	if (last_slash)
-		strcpy(last_slash, "\\positions.ini");
+	{
+		size_t remaining = ARRAYSIZE(ini_path) - (size_t)(last_slash - ini_path);
+		StringCchCopyA(last_slash, remaining, "\\positions.ini");
+	}
 	else
 		return;
 
@@ -712,10 +741,13 @@ void CBrowserHost::LoadPosition()
 	SysFreeString(loc_wide);
 
 	char ini_path[512];
-	strcpy(ini_path,options.IniFileName);
+	StringCchCopyA(ini_path, ARRAYSIZE(ini_path), options.IniFileName);
 	char* last_slash = strrchr(ini_path, '\\');
 	if (last_slash)
-		strcpy(last_slash, "\\positions.ini");
+	{
+		size_t remaining = ARRAYSIZE(ini_path) - (size_t)(last_slash - ini_path);
+		StringCchCopyA(last_slash, remaining, "\\positions.ini");
+	}
 	else
 		return;
 
@@ -809,8 +841,8 @@ void CBrowserHost::ClearSearchHighlight()
 	CComQIPtr<IHighlightRenderingServices> hl_services(html_disp);
 	if(!hl_services)
 		return;
-	int segm_count = mSearchHighlightSegments.size();
-	for(int i=0;i<segm_count;++i)
+	size_t segm_count = mSearchHighlightSegments.size();
+	for(size_t i=0;i<segm_count;++i)
 		if(mSearchHighlightSegments[i])
 			hl_services->RemoveSegment(mSearchHighlightSegments[i]);
 	mSearchHighlightSegments.clear();
@@ -911,7 +943,7 @@ bool CBrowserHost::HighlightStrings(CComBSTR search, long search_flags)
 		mSearchHighlightSegments.push_back(hl_segment);
 		if(GetTickCount()>last_status_update_time+500)
 		{
-			SetStatusText(GetSearchStatusString(mSearchHighlightSegments.size(), false));
+			SetStatusText(GetSearchStatusString((int)mSearchHighlightSegments.size(), false));
 			last_status_update_time = GetTickCount();
 		}
 		long t;
@@ -921,7 +953,7 @@ bool CBrowserHost::HighlightStrings(CComBSTR search, long search_flags)
 		if(!t)
 			break;
 	}
-	SetStatusText(GetSearchStatusString(mSearchHighlightSegments.size(), true), 1000);
+	SetStatusText(GetSearchStatusString((int)mSearchHighlightSegments.size(), true), 1000);
 	return true;
 }
 
@@ -1111,7 +1143,7 @@ bool CBrowserHost::FindText(CComBSTR search, long search_flags, bool backward)
 			{
 				SetStatusText(GetSearchStatusString(-1, false));
 				UpdateSearchHighlight();
-				SetStatusText(GetSearchStatusString(mSearchHighlightSegments.size(), true), 1000);
+				SetStatusText(GetSearchStatusString((int)mSearchHighlightSegments.size(), true), 1000);
 			}
 			SetCurrentSearchHighlight(txt_range);
 		}
@@ -1239,7 +1271,7 @@ void RefreshBrowser(); // defined in main()
 void CBrowserHost::ProcessHotkey(UINT Msg, DWORD Key, DWORD Info)
 {
 	char str_action[80];
-	CAtlString full_name = GetFullKeyName(Key);
+	CAtlString full_name = GetFullKeyName((WORD)Key);
 	if((full_name=="F3" || full_name=="Shift+F3") && IsSearchHighlightEnabled())
 	{
 		if (mWebBrowser)
@@ -1390,9 +1422,11 @@ STDMETHODIMP CBrowserHost::QueryInterface(REFIID riid, void ** ppvObject)
     if(ppvObject == NULL) 
 		return E_INVALIDARG;
     else if(riid == IID_IUnknown)
-        *ppvObject = (IUnknown*)this;
+        *ppvObject = (IUnknown*)(IDispatch*)this;
     else if(riid == IID_IDispatch)
 		*ppvObject = (IDispatch*)this;
+	else if(riid == IID_IOleControlSite)
+		*ppvObject = (IOleControlSite*)this;
     else if(riid == IID_IOleClientSite)
 		*ppvObject = (IOleClientSite*)this;
     else if(riid == IID_IOleInPlaceSite)
@@ -1502,6 +1536,7 @@ DWORD WINAPI NewWindowThreadFunc(LPVOID param)
 
 void CBrowserHost::LoadWebBrowserFromStreamWrapper(const BYTE* html, int length)
 {
+	DebugLog("browserhost.cpp:LoadWebBrowserFromStreamWrapper", (mIsWebView2Initialized && mWebView) ? "WebView2" : (mWebBrowser ? "WebBrowser" : "Pending"));
 	std::string s((const char*)html, length);
 	std::wstring ws = Utf8ToWide(s);
 
@@ -1511,25 +1546,60 @@ void CBrowserHost::LoadWebBrowserFromStreamWrapper(const BYTE* html, int length)
 	}
 	else if (mWebBrowser)
 	{
-		IStream* pStream = SHCreateMemStream(html, (UINT)length);
-		if (!pStream)
-			return;
-
 		IDispatch* pHtmlDoc = NULL;
 		mWebBrowser->get_Document(&pHtmlDoc);
 
 		if (pHtmlDoc) {
-			IPersistStreamInit* pPersistStreamInit = NULL;
-			HRESULT hrQI = pHtmlDoc->QueryInterface(IID_IPersistStreamInit, (void**)&pPersistStreamInit);
-			if (SUCCEEDED(hrQI) && pPersistStreamInit) {
-				pPersistStreamInit->InitNew();
-				pPersistStreamInit->Load(pStream);
-				pPersistStreamInit->Release();
+			IHTMLDocument2* pDoc2 = NULL;
+			HRESULT hrDoc2 = pHtmlDoc->QueryInterface(IID_IHTMLDocument2, (void**)&pDoc2);
+			if (SUCCEEDED(hrDoc2) && pDoc2)
+			{
+				SAFEARRAY* psa = SafeArrayCreateVector(VT_VARIANT, 0, 1);
+				if (psa)
+				{
+					VARIANT* v = NULL;
+					if (SUCCEEDED(SafeArrayAccessData(psa, (void**)&v)) && v)
+					{
+						VariantInit(v);
+						v->vt = VT_BSTR;
+						v->bstrVal = SysAllocString(ws.c_str());
+						bool ok = (v->bstrVal != NULL);
+						SafeArrayUnaccessData(psa);
+
+						if (ok)
+						{
+							pDoc2->write(psa);
+							pDoc2->close();
+						}
+					}
+					SafeArrayDestroy(psa);
+				}
+
+				pDoc2->Release();
+			}
+			else
+			{
+				const BYTE utf8Bom[3] = { 0xEF, 0xBB, 0xBF };
+				std::vector<BYTE> buf;
+				buf.reserve((size_t)length + 3);
+				buf.insert(buf.end(), utf8Bom, utf8Bom + 3);
+				buf.insert(buf.end(), html, html + length);
+
+				IStream* pStream = SHCreateMemStream(buf.data(), (UINT)buf.size());
+				if (pStream)
+				{
+					IPersistStreamInit* pPersistStreamInit = NULL;
+					HRESULT hrQI = pHtmlDoc->QueryInterface(IID_IPersistStreamInit, (void**)&pPersistStreamInit);
+					if (SUCCEEDED(hrQI) && pPersistStreamInit) {
+						pPersistStreamInit->InitNew();
+						pPersistStreamInit->Load(pStream);
+						pPersistStreamInit->Release();
+					}
+					pStream->Release();
+				}
 			}
 			pHtmlDoc->Release();
 		}
-
-		pStream->Release();
 	}
 	else
 	{

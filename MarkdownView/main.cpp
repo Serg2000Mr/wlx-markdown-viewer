@@ -4,6 +4,7 @@
 
 #include <direct.h>
 #include <windows.h>
+#include <VersionHelpers.h>
 #include <shlwapi.h>
 #include <gdiplus.h>
 #include <objidl.h>
@@ -27,6 +28,7 @@
 #include <mutex>
 #include <thread>
 #include <atomic>
+#include <strsafe.h>
 #include "functions.h"
 
 #include "Markdown/markdown.h"
@@ -328,6 +330,39 @@ namespace {
 		out.resize(needed);
 		WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), (int)ws.size(), &out[0], needed, nullptr, nullptr);
 		return out;
+	}
+
+	static bool TryMultiByteToWide(UINT codePage, const char* input, std::wstring& out)
+	{
+		out.clear();
+		if (!input)
+			return false;
+
+		int needed = MultiByteToWideChar(codePage, 0, input, -1, nullptr, 0);
+		if (needed <= 0)
+			return false;
+
+		out.assign((size_t)needed, L'\0');
+		int written = MultiByteToWideChar(codePage, 0, input, -1, &out[0], needed);
+		if (written <= 0)
+		{
+			out.clear();
+			return false;
+		}
+
+		if (!out.empty() && out.back() == L'\0')
+			out.pop_back();
+
+		return true;
+	}
+
+	static bool TryAnyToWide(const char* input, std::wstring& out)
+	{
+		if (TryMultiByteToWide(CP_ACP, input, out))
+			return true;
+		if (TryMultiByteToWide(CP_UTF8, input, out))
+			return true;
+		return false;
 	}
 
 	static std::string EscapeJsSingleQuoted(const std::string& s)
@@ -764,7 +799,9 @@ void RefreshBrowser();
 
 void StoreRefreshParams(const char* FileToLoad, HWND ParentWin, int ShowFlags)
 {
-	strcpy(FileToLoadCopy, FileToLoad);
+	FileToLoadCopy[0] = '\0';
+	if (FileToLoad)
+		StringCchCopyA(FileToLoadCopy, ARRAYSIZE(FileToLoadCopy), FileToLoad);
 	ParentWinCopy = ParentWin;
 	ShowFlagsCopy = ShowFlags;
 }
@@ -790,13 +827,7 @@ void InitProc()
 	{
 		unsigned char toolbar_bpp = (options.toolbar>>2)&3;
 		if(toolbar_bpp==2)
-		{
-			OSVERSIONINFO osvi;
-			ZeroMemory(&osvi, sizeof(OSVERSIONINFO));
-			osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
-			GetVersionEx(&osvi);
-			toolbar_bpp = (osvi.dwMajorVersion>5||osvi.dwMajorVersion==5&&osvi.dwMinorVersion>=1)?1:0;
-		}
+			toolbar_bpp = IsWindowsXPOrGreater() ? 1 : 0;
 		if(toolbar_bpp==1)
 			img_list = ImageList_LoadImage(hinst, MAKEINTRESOURCE(IDB_BITMAP2), 24, 0, CLR_NONE, IMAGE_BITMAP, LR_CREATEDIBSECTION);
 		else
@@ -1040,7 +1071,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			bool alt_down = 0x20000000&lParam;
 			bool key_down = 0x80000000&lParam;
 			UINT Msg = key_down?(alt_down?WM_SYSKEYUP:WM_KEYUP):(alt_down?WM_SYSKEYDOWN:WM_KEYDOWN);
-			CAtlString key_name = GetFullKeyName(wParam);
+			CAtlString key_name = GetFullKeyName((WORD)wParam);
 			if(key_name=="Ctrl+Insert")
 				SendMessage(hWnd, WM_IEVIEW_COMMAND, lc_copy, 0);
 			if(browser_host->FormFocused())
@@ -1053,7 +1084,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				if(trans_hotkeys.find(key_name)&&!GetCapture()) 
 					SendMessage(hWnd, Msg, wParam, lParam);
 			}
-			browser_host->ProcessHotkey(Msg, wParam, lParam);
+			browser_host->ProcessHotkey(Msg, (DWORD)(UINT_PTR)wParam, (DWORD)(ULONG_PTR)lParam);
 		}
 	}
 
@@ -1092,7 +1123,7 @@ HWND Create_Toolbar(HWND ListWin)
 		{4, 0,				TBSTATE_ENABLED, BTNS_SEP,	  NULL},
 		{7, TBB_SEARCH,		TBSTATE_ENABLED, BTNS_BUTTON, NULL},
 		{4, 0,				TBSTATE_ENABLED, BTNS_SEP,	  NULL},
-		{gTranslateToolbarImageIndex >= 0 ? gTranslateToolbarImageIndex : I_IMAGENONE, TBB_TRANSLATE, gTranslateEnabled ? TBSTATE_ENABLED : 0, BTNS_BUTTON, NULL}
+		{gTranslateToolbarImageIndex >= 0 ? gTranslateToolbarImageIndex : I_IMAGENONE, TBB_TRANSLATE, (BYTE)(gTranslateEnabled ? TBSTATE_ENABLED : 0), BTNS_BUTTON, NULL}
 	};
 	const int tb_count = (int)(sizeof(tb_buttons) / sizeof(tb_buttons[0]));
 	for (int i = 0; i < tb_count; i++)
@@ -1124,11 +1155,15 @@ HWND Create_Toolbar(HWND ListWin)
 
 CComBSTR GetUrlFromFilename(char* FileToLoad)
 {
+	if (!FileToLoad || !FileToLoad[0])
+		return NULL;
+
 	CAtlString url;
 	char ext[MAX_PATH];
 	_splitpath(FileToLoad, NULL, NULL, NULL, ext);
 	strlwr(ext);
-	if((options.flags&OPT_DIRS)&&FileToLoad[strlen(FileToLoad)-1]=='\\')
+	size_t len = strlen(FileToLoad);
+	if ((options.flags & OPT_DIRS) && len > 0 && FileToLoad[len - 1] == '\\')
 		url = FileToLoad;
 	else if( html_extensions.find(ext+1) )
 		url = FileToLoad;
@@ -1149,7 +1184,7 @@ void do_events()
 		result = ::GetMessage(&msg, NULL, 0, 0);
 		if (result == 0) // WM_QUIT
 		{
-			::PostQuitMessage(msg.wParam);
+			::PostQuitMessage((int)msg.wParam);
 			break;
 		}
 		else if (result == -1)
@@ -1192,23 +1227,36 @@ void CleanupTempHtmlFile()
 void browser_show_file(CBrowserHost* browserHost, const char* filename, bool useDarkTheme)
 {
 	InitTranslateSettings();
+	DebugLog("main.cpp:browser_show_file", useDarkTheme ? "dark=1" : "dark=0");
 
 	CHAR css[MAX_PATH];
+	css[0] = '\0';
 	GetModuleFileName(hinst, css, MAX_PATH);
 	PathRemoveFileSpec(css);
-	strcat(css, "\\");
-	strcat(css, useDarkTheme ? html_template_dark : html_template);
+	StringCchCatA(css, ARRAYSIZE(css), "\\");
+	StringCchCatA(css, ARRAYSIZE(css), useDarkTheme ? html_template_dark : html_template);
 
 	CleanupTempHtmlFile();
 
-	int size_needed = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0);
-	std::wstring wFile(size_needed, 0);
-	MultiByteToWideChar(CP_ACP, 0, filename, -1, &wFile[0], size_needed);
+	std::wstring wFile;
+	if (!TryAnyToWide(filename, wFile))
+	{
+		std::string html = "<html><body><h1>Error</h1><p>Failed to decode file name.</p></body></html>";
+		browserHost->LoadWebBrowserFromStreamWrapper((const BYTE*)html.data(), (int)html.size());
+		return;
+	}
 
 	wchar_t folderPath[MAX_PATH];
-	wcscpy(folderPath, wFile.c_str());
-	PathRemoveFileSpecW(folderPath);
-	browserHost->UpdateFolderMapping(folderPath);
+	if (SUCCEEDED(StringCchCopyW(folderPath, ARRAYSIZE(folderPath), wFile.c_str())))
+	{
+		PathRemoveFileSpecW(folderPath);
+		browserHost->UpdateFolderMapping(folderPath);
+	}
+	else
+	{
+		folderPath[0] = L'\0';
+		browserHost->UpdateFolderMapping(L"");
+	}
 
 	if (browserHost->mIsWebView2Initialized && browserHost->mWebView) {
 		CComQIPtr<ICoreWebView2_3> webView3 = browserHost->mWebView;
@@ -1218,19 +1266,19 @@ void browser_show_file(CBrowserHost* browserHost, const char* filename, bool use
 
 			bool hasInfo = TryGetFileInfo(wFile, fileSize, lastWrite);
 
-			int cssWLen = MultiByteToWideChar(CP_ACP, 0, css, -1, NULL, 0);
-			std::wstring wCss(cssWLen, 0);
-			MultiByteToWideChar(CP_ACP, 0, css, -1, &wCss[0], cssWLen);
+			std::wstring wCss;
+			TryMultiByteToWide(CP_ACP, css, wCss);
 
-			int extWLen = MultiByteToWideChar(CP_ACP, 0, renderer_extensions, -1, NULL, 0);
-			std::wstring wExt(extWLen, 0);
-			MultiByteToWideChar(CP_ACP, 0, renderer_extensions, -1, &wExt[0], extWLen);
+			std::wstring wExt;
+			TryMultiByteToWide(CP_ACP, renderer_extensions, wExt);
 			if (gTranslateEnabled) {
 				std::string trKey = std::string("|gt:") + (gTranslateTargetLang[0] ? gTranslateTargetLang : "ru") + (gTranslateAuto ? "|1" : "|0");
 				int trLen = MultiByteToWideChar(CP_ACP, 0, trKey.c_str(), (int)trKey.size(), NULL, 0);
-				std::wstring wTr(trLen, 0);
-				MultiByteToWideChar(CP_ACP, 0, trKey.c_str(), (int)trKey.size(), &wTr[0], trLen);
-				wExt.append(ToLowerWin(std::move(wTr)));
+				if (trLen > 0) {
+					std::wstring wTr(trLen, 0);
+					MultiByteToWideChar(CP_ACP, 0, trKey.c_str(), (int)trKey.size(), &wTr[0], trLen);
+					wExt.append(ToLowerWin(std::move(wTr)));
+				}
 			}
 
 			MarkdownHtmlCacheKey key{
@@ -1305,6 +1353,8 @@ void browser_show_file(CBrowserHost* browserHost, const char* filename, bool use
 	FILE* f = _wfopen(TempHtmlFilePath, L"wb");
 	if (f)
 	{
+		const unsigned char utf8Bom[3] = { 0xEF, 0xBB, 0xBF };
+		fwrite(utf8Bom, 1, 3, f);
 		fwrite(html.data(), 1, html.size(), f);
 		fclose(f);
 
@@ -1323,11 +1373,18 @@ bool is_markdown(const char* FileToLoad)
 	_splitpath(FileToLoad, NULL, NULL, NULL, ext);
 	strlwr(ext);
 
-	return markdown_extensions.find(ext + 1);
+	bool isMd = markdown_extensions.find(ext + 1);
+	char msg[256]{};
+	sprintf_s(msg, "ext=%s is_markdown=%d", ext, isMd ? 1 : 0);
+	DebugLog("main.cpp:is_markdown", msg);
+	return isMd;
 }
 
 int __stdcall ListLoadNext(HWND ParentWin, HWND PluginWin, char* FileToLoad, int ShowFlags)
 {
+	if (!FileToLoad || !FileToLoad[0])
+		return LISTPLUGIN_ERROR;
+
 	CComBSTR url = GetUrlFromFilename(FileToLoad);
 	if (url.Length() == 0 && !is_markdown(FileToLoad))
 		return LISTPLUGIN_ERROR;
@@ -1348,11 +1405,17 @@ int __stdcall ListLoadNext(HWND ParentWin, HWND PluginWin, char* FileToLoad, int
 
 HWND __stdcall ListLoad(HWND ParentWin, char* FileToLoad, int ShowFlags)
 {
+	char msgFlags[64]{};
+	sprintf_s(msgFlags, "ShowFlags=0x%X", (unsigned int)ShowFlags);
+	DebugLog("main.cpp:ListLoad", msgFlags);
 	HRESULT hrOle = OleInitialize(NULL);
 	InitProc();
 
+	if (!FileToLoad || !FileToLoad[0])
+		return NULL;
+
 	CComBSTR url = GetUrlFromFilename(FileToLoad);
-	
+
 	if (url.Length() == 0 && !is_markdown(FileToLoad))
 		return NULL;
 
