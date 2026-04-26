@@ -31,6 +31,8 @@ IDB_BITMAP2             BITMAP                  "toolbar.bmp"
 
 IDR_TRANSLATE_PNG       RCDATA                  "..\\Pictures\\googletranslate1 32.png"
 
+IDR_FASTFONT_PNG        RCDATA                  "..\\Pictures\\bionic_b_24.png"
+
 
 /////////////////////////////////////////////////////////////////////////////
 //

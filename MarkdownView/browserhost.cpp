@@ -55,7 +55,8 @@ CBrowserHost::CBrowserHost() :
 	mIsShuttingDown(false),
 	mZoomFactor(1.0),
 	mScrollTop(0),
-	mFolderMappingEnabled(false)
+	mFolderMappingEnabled(false),
+	mAssetsMappingEnabled(false)
 {
 	mLastSearchString.Empty();
 	mLastSearchFlags = 0;
@@ -232,6 +233,7 @@ bool CBrowserHost::CreateBrowser(HWND hParent)
 					args->get_WebErrorStatus(&status);
 					if (options.flags & OPT_SAVEPOS)
 						LoadPosition();
+					ReapplyFastFontIfEnabled();
 					return S_OK;
 				}).Get(),
 			nullptr);
@@ -286,9 +288,10 @@ bool CBrowserHost::CreateBrowser(HWND hParent)
 				PathRemoveFileSpecW(pluginDir);
 				CComQIPtr<ICoreWebView2_3> webView3 = mWebView;
 				if (webView3) {
-					webView3->SetVirtualHostNameToFolderMapping(
+					HRESULT hrAssets = webView3->SetVirtualHostNameToFolderMapping(
 						L"assets.internal", pluginDir,
 						COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+					mAssetsMappingEnabled = SUCCEEDED(hrAssets);
 				}
 			}
 		}
@@ -470,6 +473,91 @@ void CBrowserHost::UpdateFolderMapping(const std::wstring& folder)
 		L"markdown.internal", mCurrentFolder.c_str(),
 		COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
 	mFolderMappingEnabled = SUCCEEDED(hr);
+}
+
+static std::wstring GetPluginFolderW()
+{
+	wchar_t modulePath[MAX_PATH] = L"";
+	GetModuleFileNameW(hinst, modulePath, MAX_PATH);
+	wchar_t folder[MAX_PATH];
+	wcscpy_s(folder, MAX_PATH, modulePath);
+	PathRemoveFileSpecW(folder);
+	return std::wstring(folder);
+}
+
+std::string CBrowserHost::BuildFontUrl(const char* filename)
+{
+	if (mAssetsMappingEnabled)
+	{
+		return std::string("https://assets.internal/css/fonts/") + filename;
+	}
+
+	std::wstring pluginFolder = GetPluginFolderW();
+	if (pluginFolder.empty())
+		return std::string();
+
+	std::wstring full = pluginFolder + L"\\css\\fonts\\" + Utf8ToWide(filename);
+	wchar_t fileUrl[2048] = L"";
+	DWORD cch = ARRAYSIZE(fileUrl);
+	HRESULT hr = UrlCreateFromPathW(full.c_str(), fileUrl, &cch, 0);
+	if (SUCCEEDED(hr))
+		return WideToUtf8(fileUrl);
+	return std::string();
+}
+
+void CBrowserHost::ApplyFastFont()
+{
+	if (!mIsWebView2Initialized || !mWebView)
+		return;
+
+	std::string sansUrl = BuildFontUrl("Fast_Sans.ttf");
+	if (sansUrl.empty())
+		return;
+
+	// Bionic применяется только к обычному тексту. Код (code/pre/kbd/samp/tt) намеренно
+	// возвращается к font-family и font-feature-settings из темы — иначе токены кода
+	// получают «жирные начальные буквы», что ломает восприятие листингов.
+	std::string js =
+		"(function(){"
+		"var e=document.getElementById('mdv-fast-font');"
+		"if(e)e.remove();"
+		"var s=document.createElement('style');"
+		"s.id='mdv-fast-font';"
+		"s.textContent="
+		"\"@font-face{font-family:'MDV Fast Sans';src:url('" + sansUrl + "') format('truetype');font-display:swap;}\"+"
+		"\"body,body *{font-family:'MDV Fast Sans',sans-serif!important;font-feature-settings:\\\"calt\\\" 1,\\\"liga\\\" 1!important;}\"+"
+		"\"code,kbd,samp,tt,pre,pre *,code *\"+"
+		"\"{font-family:ui-monospace,SFMono-Regular,Consolas,monospace!important;font-feature-settings:normal!important;}\"+"
+		"\"b,strong,b *,strong *,\"+"
+		"\"h1,h2,h3,h4,h5,h6,h1 *,h2 *,h3 *,h4 *,h5 *,h6 *,\"+"
+		"\"a,a *,\"+"
+		"\"font,font *,[color],[color] *,\"+"
+		"\"[style*='color:'],[style*='color:'] *,\"+"
+		"\"mark,mark *,\"+"
+		"\"svg,svg *,.mermaid,.mermaid *\"+"
+		"\"{font-family:\\\"Segoe UI\\\",system-ui,-apple-system,sans-serif!important;font-feature-settings:normal!important;}\";"
+		"document.head.appendChild(s);"
+		"})();";
+
+	std::wstring wjs = Utf8ToWide(js);
+	mWebView->ExecuteScript(wjs.c_str(), nullptr);
+}
+
+void CBrowserHost::RemoveFastFont()
+{
+	if (!mIsWebView2Initialized || !mWebView)
+		return;
+	const wchar_t* js =
+		L"(function(){var e=document.getElementById('mdv-fast-font');if(e)e.remove();})();";
+	mWebView->ExecuteScript(js, nullptr);
+}
+
+void CBrowserHost::ReapplyFastFontIfEnabled()
+{
+	if (!mParentWin)
+		return;
+	if (GetProp(mParentWin, PROP_FASTFONT))
+		ApplyFastFont();
 }
 
 void CBrowserHost::Navigate(const wchar_t* url)
