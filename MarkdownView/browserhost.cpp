@@ -260,6 +260,21 @@ bool CBrowserHost::CreateBrowser(HWND hParent)
 		}
 
 		UpdateFolderMapping(mCurrentFolder);
+
+		// Second virtual host for plugin-shipped assets (vendor JS/CSS, fonts, etc.)
+		{
+			wchar_t pluginDir[MAX_PATH];
+			if (GetModuleFileNameW(hinst, pluginDir, MAX_PATH) > 0) {
+				PathRemoveFileSpecW(pluginDir);
+				CComQIPtr<ICoreWebView2_3> webView3 = mWebView;
+				if (webView3) {
+					webView3->SetVirtualHostNameToFolderMapping(
+						L"assets.internal", pluginDir,
+						COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+				}
+			}
+		}
+
 		Resize();
 
 		mIsWebView2Initialized = true;

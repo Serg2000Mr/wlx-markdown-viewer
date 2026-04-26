@@ -1,0 +1,149 @@
+/*
+  1C:Enterprise Configurator palette for hljs blocks (.language-1c, .language-bsl).
+  Colors taken from Monaco's bsl-white theme (community 1C:Enterprise Monaco package).
+  Other languages keep their hljs theme colors.
+*/
+
+/* Default color for the block — blue, matches Monaco bsl-white identifierbsl.
+   Means any unclassified identifier (variables, properties, dotted access)
+   inherits the identifier color. Strings/numbers/punctuation override below. */
+pre code.language-1c,
+pre code.language-bsl,
+pre code.language-1c.hljs,
+pre code.language-bsl.hljs {
+  color: #0000ff;
+  background: #ffffff;
+}
+
+/* Keywords (Если, Цикл, Возврат, КонецЕсли, КонецЦикла, ...) — red.
+   Note: hljs-meta .hljs-keyword is excluded — directives like &НаСервере
+   should stay one solid color (brown) like in Monaco bsl-white. */
+pre code.language-1c .hljs-keyword,
+pre code.language-bsl .hljs-keyword,
+pre code.language-1c .hljs-section,
+pre code.language-bsl .hljs-section {
+  color: #ff0000;
+  font-weight: normal;
+}
+
+/*
+  hljs grammar wraps procedure/function declarations in <span class="hljs-function">…</span>:
+  - "Процедура" / "Функция" appear as raw text at the start of the wrapper
+  - "КонецПроцедуры" / "КонецФункции" are also raw text inside another hljs-function span
+  Color the wrapper red so the raw keyword text is red, then override
+  child spans (hljs-title, hljs-params) back to their identifier color.
+*/
+pre code.language-1c .hljs-function,
+pre code.language-bsl .hljs-function {
+  color: #ff0000;
+}
+
+/* Identifiers, system functions, types (Сообщить, Формат, Тип, ВидПоляФормы, ...) — blue */
+pre code.language-1c .hljs-built_in,
+pre code.language-bsl .hljs-built_in,
+pre code.language-1c .hljs-title,
+pre code.language-bsl .hljs-title,
+pre code.language-1c .hljs-title.function_,
+pre code.language-bsl .hljs-title.function_,
+pre code.language-1c .hljs-title.class_,
+pre code.language-bsl .hljs-title.class_,
+pre code.language-1c .hljs-name,
+pre code.language-bsl .hljs-name,
+pre code.language-1c .hljs-literal,
+pre code.language-bsl .hljs-literal {
+  color: #0000ff;
+  font-weight: normal;
+}
+
+/* Preprocessor directives (&НаКлиенте, &НаСервере, #Если...) — brown.
+   Includes nested .hljs-keyword so the whole directive (& + word) is one color. */
+pre code.language-1c .hljs-meta,
+pre code.language-bsl .hljs-meta,
+pre code.language-1c .hljs-meta .hljs-keyword,
+pre code.language-bsl .hljs-meta .hljs-keyword {
+  color: #963200;
+  font-weight: normal;
+}
+
+/* Comments — green */
+pre code.language-1c .hljs-comment,
+pre code.language-bsl .hljs-comment,
+pre code.language-1c .hljs-quote,
+pre code.language-bsl .hljs-quote {
+  color: #008000;
+  font-style: normal;
+}
+
+/* Strings, numbers, punctuation — black (overrides default blue) */
+pre code.language-1c .hljs-string,
+pre code.language-bsl .hljs-string,
+pre code.language-1c .hljs-number,
+pre code.language-bsl .hljs-number,
+pre code.language-1c .hljs-symbol,
+pre code.language-bsl .hljs-symbol,
+pre code.language-1c .hljs-punctuation,
+pre code.language-bsl .hljs-punctuation {
+  color: #000000;
+  font-weight: normal;
+}
+
+/* Inside hljs-function (declaration), child identifier spans must NOT inherit red */
+pre code.language-1c .hljs-function .hljs-title,
+pre code.language-bsl .hljs-function .hljs-title,
+pre code.language-1c .hljs-function .hljs-params,
+pre code.language-bsl .hljs-function .hljs-params {
+  color: #0000ff;
+}
+
+/* Dark theme (Monaco bsl-black palette) */
+@media (prefers-color-scheme: dark) {
+  pre code.language-1c,
+  pre code.language-bsl,
+  pre code.language-1c.hljs,
+  pre code.language-bsl.hljs {
+    color: #d4d4d4;
+    background: #1e1e1e;
+  }
+  pre code.language-1c .hljs-keyword,
+  pre code.language-bsl .hljs-keyword,
+  pre code.language-1c .hljs-section,
+  pre code.language-bsl .hljs-section,
+  pre code.language-1c .hljs-function,
+  pre code.language-bsl .hljs-function {
+    color: #499caa;
+  }
+  pre code.language-1c .hljs-function .hljs-title,
+  pre code.language-bsl .hljs-function .hljs-title,
+  pre code.language-1c .hljs-function .hljs-params,
+  pre code.language-bsl .hljs-function .hljs-params {
+    color: #d4d4d4;
+  }
+  pre code.language-1c .hljs-built_in,
+  pre code.language-bsl .hljs-built_in,
+  pre code.language-1c .hljs-title,
+  pre code.language-bsl .hljs-title,
+  pre code.language-1c .hljs-title.function_,
+  pre code.language-bsl .hljs-title.function_,
+  pre code.language-1c .hljs-title.class_,
+  pre code.language-bsl .hljs-title.class_,
+  pre code.language-1c .hljs-name,
+  pre code.language-bsl .hljs-name,
+  pre code.language-1c .hljs-literal,
+  pre code.language-bsl .hljs-literal {
+    color: #d4d4d4;
+  }
+  pre code.language-1c .hljs-comment,
+  pre code.language-bsl .hljs-comment,
+  pre code.language-1c .hljs-quote,
+  pre code.language-bsl .hljs-quote {
+    color: #6a9955;
+  }
+  pre code.language-1c .hljs-string,
+  pre code.language-bsl .hljs-string {
+    color: #c3602c;
+  }
+  pre code.language-1c .hljs-number,
+  pre code.language-bsl .hljs-number {
+    color: #b5cea8;
+  }
+}

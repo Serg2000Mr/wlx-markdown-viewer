@@ -419,9 +419,12 @@ public static class Lib
             if (syntaxHighlightEnabled)
             {
                 string hljsTheme = syntaxHighlightDarkTheme ? "github-dark" : "github";
-                sb.Append("<link rel='stylesheet' href='https://cdn.jsdelivr.net/npm/highlight.js@11/styles/").Append(hljsTheme).AppendLine(".min.css'>");
-                sb.AppendLine("<script src='https://cdn.jsdelivr.net/npm/highlight.js@11/lib/common.min.js' defer></script>");
-                sb.AppendLine("<script>window.addEventListener('load',function(){if(!window.hljs)return;var aliasMap={'c#':'csharp','f#':'fsharp'};document.querySelectorAll('pre code:not(.language-mermaid)').forEach(function(b){var lc=b.className.split(/\\s+/).find(function(c){return c.indexOf('language-')===0;});if(!lc)return;var lang=lc.substring(9).toLowerCase();lang=aliasMap[lang]||lang;if(!window.hljs.getLanguage(lang))return;try{var r=hljs.highlight(b.textContent||'',{language:lang,ignoreIllegals:true});b.innerHTML=r.value;b.classList.add('hljs');b.dataset.highlighted='yes';}catch(e){}});});</script>");
+                sb.Append("<link rel='stylesheet' href='https://assets.internal/vendor/hljs/").Append(hljsTheme).AppendLine(".min.css'>");
+                sb.AppendLine("<link rel='stylesheet' href='https://assets.internal/vendor/hljs/themes/1c-overrides.css?v=5'>");
+                sb.AppendLine("<script src='https://assets.internal/vendor/hljs/highlight.min.js' defer></script>");
+                sb.AppendLine("<script src='https://assets.internal/vendor/hljs/languages/fsharp.min.js' defer></script>");
+                sb.AppendLine("<script src='https://assets.internal/vendor/hljs/languages/1c.min.js' defer></script>");
+                sb.AppendLine("<script>document.addEventListener('DOMContentLoaded',function(){if(!window.hljs)return;var aliasMap={'c#':'csharp','f#':'fsharp','1с':'1c','bsl':'1c'};document.querySelectorAll('pre code:not(.language-mermaid)').forEach(function(b){var lc=b.className.split(/\\s+/).find(function(c){return c.indexOf('language-')===0;});if(!lc)return;var lang=lc.substring(9).toLowerCase();lang=aliasMap[lang]||lang;if(!window.hljs.getLanguage(lang))return;try{var r=hljs.highlight(b.textContent||'',{language:lang,ignoreIllegals:true});b.innerHTML=r.value;b.classList.add('hljs');b.dataset.highlighted='yes';}catch(e){}});});</script>");
             }
             sb.AppendLine("</head>");
             sb.AppendLine("<body>");
