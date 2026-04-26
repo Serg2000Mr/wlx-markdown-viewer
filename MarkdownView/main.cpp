@@ -57,6 +57,8 @@ namespace {
 	ULONG_PTR gGdiPlusToken = 0;
 	HICON gTranslateIcon = NULL;
 	int gTranslateToolbarImageIndex = -1;
+	HICON gFastFontIcon = NULL;
+	int gFastFontToolbarImageIndex = -1;
 
 	static void EnsureGdiPlus()
 	{
@@ -119,6 +121,60 @@ namespace {
 
 		gTranslateIcon = icon;
 		return gTranslateIcon;
+	}
+
+	static HICON LoadFastFontIcon24()
+	{
+		if (gFastFontIcon)
+			return gFastFontIcon;
+
+		EnsureGdiPlus();
+		if (gGdiPlusToken == 0)
+			return NULL;
+
+		HRSRC resInfo = FindResourceW(hinst, MAKEINTRESOURCEW(IDR_FASTFONT_PNG), MAKEINTRESOURCEW(10));
+		if (!resInfo)
+			return NULL;
+		DWORD resSize = SizeofResource(hinst, resInfo);
+		if (resSize == 0)
+			return NULL;
+		HGLOBAL resData = LoadResource(hinst, resInfo);
+		if (!resData)
+			return NULL;
+		void* resPtr = LockResource(resData);
+		if (!resPtr)
+			return NULL;
+
+		HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, resSize);
+		if (!hMem)
+			return NULL;
+		void* memPtr = GlobalLock(hMem);
+		if (!memPtr)
+		{
+			GlobalFree(hMem);
+			return NULL;
+		}
+		memcpy(memPtr, resPtr, resSize);
+		GlobalUnlock(hMem);
+
+		IStream* stream = nullptr;
+		if (FAILED(CreateStreamOnHGlobal(hMem, TRUE, &stream)) || !stream)
+		{
+			GlobalFree(hMem);
+			return NULL;
+		}
+
+		Gdiplus::Bitmap bmp(stream, FALSE);
+		stream->Release();
+		if (bmp.GetLastStatus() != Gdiplus::Ok)
+			return NULL;
+
+		HICON icon = NULL;
+		if (bmp.GetHICON(&icon) != Gdiplus::Ok || !icon)
+			return NULL;
+
+		gFastFontIcon = icon;
+		return gFastFontIcon;
 	}
 
 	struct MarkdownHtmlCacheKey
@@ -978,6 +1034,23 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			case TBB_TRANSLATE:
 				browser_host->ExecuteScript(L"if(window.__mdv_gt_load) window.__mdv_gt_load();");
 				break;
+			case TBB_FASTFONT:
+				if (lParam == (LPARAM)toolbar)
+				{
+					LRESULT st = SendMessage(toolbar, TB_GETSTATE, TBB_FASTFONT, 0);
+					HWND parent = GetParent(hWnd);
+					if (st != -1 && (st & TBSTATE_CHECKED))
+					{
+						SetProp(parent, PROP_FASTFONT, (HANDLE)1);
+						browser_host->ApplyFastFont();
+					}
+					else
+					{
+						RemoveProp(parent, PROP_FASTFONT);
+						browser_host->RemoveFastFont();
+					}
+				}
+				break;
 			}
 		}
 	}
@@ -1078,7 +1151,22 @@ HWND Create_Toolbar(HWND ListWin)
 		}
 	}
 
-	TBBUTTON tb_buttons[] = 
+	if (img_list && gFastFontToolbarImageIndex < 0)
+	{
+		HICON icon = LoadFastFontIcon24();
+		if (icon)
+		{
+			int idx = ImageList_AddIcon(img_list, icon);
+			if (idx >= 0)
+				gFastFontToolbarImageIndex = idx;
+		}
+	}
+
+	BYTE fastFontState = TBSTATE_ENABLED;
+	if (GetProp(GetParent(ListWin), PROP_FASTFONT))
+		fastFontState |= TBSTATE_CHECKED;
+
+	TBBUTTON tb_buttons[] =
 	{
 		{0, TBB_BACK,		TBSTATE_ENABLED, BTNS_BUTTON, NULL},
 		{1, TBB_FORWARD,	TBSTATE_ENABLED, BTNS_BUTTON, NULL},
@@ -1092,7 +1180,9 @@ HWND Create_Toolbar(HWND ListWin)
 		{4, 0,				TBSTATE_ENABLED, BTNS_SEP,	  NULL},
 		{7, TBB_SEARCH,		TBSTATE_ENABLED, BTNS_BUTTON, NULL},
 		{4, 0,				TBSTATE_ENABLED, BTNS_SEP,	  NULL},
-		{gTranslateToolbarImageIndex >= 0 ? gTranslateToolbarImageIndex : I_IMAGENONE, TBB_TRANSLATE, gTranslateEnabled ? TBSTATE_ENABLED : 0, BTNS_BUTTON, NULL}
+		{gFastFontToolbarImageIndex >= 0 ? gFastFontToolbarImageIndex : I_IMAGENONE, TBB_FASTFONT, fastFontState, BTNS_CHECK, NULL},
+		{4, 0,				TBSTATE_ENABLED, BTNS_SEP,	  NULL},
+		{gTranslateToolbarImageIndex >= 0 ? gTranslateToolbarImageIndex : I_IMAGENONE, TBB_TRANSLATE, (BYTE)(gTranslateEnabled ? TBSTATE_ENABLED : 0), BTNS_BUTTON, NULL}
 	};
 	const int tb_count = (int)(sizeof(tb_buttons) / sizeof(tb_buttons[0]));
 	for (int i = 0; i < tb_count; i++)
@@ -1486,6 +1576,11 @@ BOOL APIENTRY DllMain( HANDLE hModule, DWORD  reason_for_call, LPVOID lpReserved
 		{
 			DestroyIcon(gTranslateIcon);
 			gTranslateIcon = NULL;
+		}
+		if (gFastFontIcon)
+		{
+			DestroyIcon(gFastFontIcon);
+			gFastFontIcon = NULL;
 		}
 		if (gGdiPlusToken != 0)
 		{

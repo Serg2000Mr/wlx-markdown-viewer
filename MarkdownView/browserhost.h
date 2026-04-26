@@ -48,7 +48,13 @@ public:
 	CComBSTR mPendingURL;
     std::wstring mCurrentFolder;
 	bool mFolderMappingEnabled;
+	bool mAssetsMappingEnabled;
     void UpdateFolderMapping(const std::wstring& folder);
+	void EnsureAssetsMapping();
+	std::string BuildFontUrl(const char* filename);
+	void ApplyFastFont();
+	void RemoveFastFont();
+	void ReapplyFastFontIfEnabled();
 	DWORD mEventsCookie;
 	int mRefCount;
 	int fSearchHighlightMode;
