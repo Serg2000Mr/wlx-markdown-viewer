@@ -178,6 +178,7 @@ namespace {
 	bool gTranslateEnabled = false;
 	bool gTranslateAuto = false;
 	char gTranslateTargetLang[16]{};
+	bool gSyntaxHighlightEnabled = true;
 	std::wstring gTranslateUiTranslate = L"Translate";
 	std::wstring gTranslateUiBusy = L"Translating...";
 	std::wstring gTranslateUiOriginal = L"Original";
@@ -315,6 +316,11 @@ namespace {
 			target.resize(sizeof(gTranslateTargetLang) - 1);
 		memset(gTranslateTargetLang, 0, sizeof(gTranslateTargetLang));
 		memcpy(gTranslateTargetLang, target.c_str(), target.size());
+	}
+
+	static void InitSyntaxHighlightSettings()
+	{
+		gSyntaxHighlightEnabled = GetPrivateProfileInt("Renderer", "EnableSyntaxHighlight", 1, options.IniFileName) != 0;
 	}
 
 	static std::string WideToUtf8(const std::wstring& ws)
@@ -818,6 +824,7 @@ void InitProc()
 	GetPrivateProfileString("Renderer", "CustomCSS", "", &html_template[0], 512, options.IniFileName);
 	GetPrivateProfileString("Renderer", "CustomCSSDark", "", &html_template_dark[0], 512, options.IniFileName);
 	InitTranslateSettings();
+	InitSyntaxHighlightSettings();
 	if (img_list && gTranslateToolbarImageIndex < 0)
 	{
 		HICON icon32 = LoadTranslateIcon32();
@@ -1192,6 +1199,11 @@ void CleanupTempHtmlFile()
 void browser_show_file(CBrowserHost* browserHost, const char* filename, bool useDarkTheme)
 {
 	InitTranslateSettings();
+	InitSyntaxHighlightSettings();
+
+	std::string shSuffix = gSyntaxHighlightEnabled
+		? std::string("|sh:on|sh-theme:") + (useDarkTheme ? "dark" : "light")
+		: std::string("|sh:off");
 
 	CHAR css[MAX_PATH];
 	GetModuleFileName(hinst, css, MAX_PATH);
@@ -1233,6 +1245,13 @@ void browser_show_file(CBrowserHost* browserHost, const char* filename, bool use
 				wExt.append(ToLowerWin(std::move(wTr)));
 			}
 
+			{
+				int shLen = MultiByteToWideChar(CP_ACP, 0, shSuffix.c_str(), (int)shSuffix.size(), NULL, 0);
+				std::wstring wSh(shLen, 0);
+				MultiByteToWideChar(CP_ACP, 0, shSuffix.c_str(), (int)shSuffix.size(), &wSh[0], shLen);
+				wExt.append(ToLowerWin(std::move(wSh)));
+			}
+
 			MarkdownHtmlCacheKey key{
 				ToLowerWin(std::wstring(wFile)),
 				ToLowerWin(std::move(wCss)),
@@ -1260,7 +1279,7 @@ void browser_show_file(CBrowserHost* browserHost, const char* filename, bool use
 
 			std::string fileStr(filename);
 			std::string cssStr(css);
-			std::string extStr(renderer_extensions);
+			std::string extStr = std::string(renderer_extensions) + shSuffix;
 			std::string baseHref = BuildBaseHref(browserHost, folderPath);
 
 			std::thread([targetWnd, token, fileStr = std::move(fileStr), cssStr = std::move(cssStr), extStr = std::move(extStr), baseHref = std::move(baseHref), key = std::move(key), hasInfo]() mutable {
@@ -1290,7 +1309,7 @@ void browser_show_file(CBrowserHost* browserHost, const char* filename, bool use
 	}
 
 	Markdown md = Markdown();
-	std::string html = md.ConvertToHtmlAscii(std::string(filename), std::string(css), std::string(renderer_extensions));
+	std::string html = md.ConvertToHtmlAscii(std::string(filename), std::string(css), std::string(renderer_extensions) + shSuffix);
 	std::string baseHref = BuildBaseHref(browserHost, folderPath);
 	EnsureBaseTag(html, baseHref);
 	InjectInPageAnchorHandler(html);
