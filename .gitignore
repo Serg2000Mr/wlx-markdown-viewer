@@ -1,3 +1,4 @@
+# build artifacts
 obj/
 bin/
 lib/
@@ -7,3 +8,38 @@ ReleaseWLX/
 x64/
 .vs/
 *.vcxproj.user
+
+# приватные документы и заметки — не для публичного репо
+AGENTS.md
+AGENTS.ru.md
+CLAUDE.md
+RELEASE_DRAFT.ru.md
+RELEASE_TEMPLATE.md
+QUICK_START.ru.md
+CSS_IMPROVEMENTS.md
+regression_checklist_ru.md
+Expand.md
+Форум сообщение.txt
+screenshot.png
+ScreenshotView.png
+manual-install.reg
+
+# build/installer/diagnostic скрипты — приватные
+BuildAll.bat
+BuildMakeSetup.bat
+advanced-check.bat
+analyze-dependencies.ps1
+apply-optimizations.bat
+check-cache-dir.bat
+check-dependencies.bat
+diagnose.bat
+diagnose.ps1
+disable-plugin.ps1
+enable-plugin.ps1
+fix-installed-plugin.bat
+fix-webview2-issue.bat
+install-plugin.ps1
+
+# архивы релизов и сборочные артефакты
+*.zip
+GitHubRelease/
