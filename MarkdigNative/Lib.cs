@@ -410,6 +410,12 @@ public static class Lib
 
             bool all = extensionsKey.Length == 0 || extensionsKey.Contains("advanced", StringComparison.OrdinalIgnoreCase);
             bool diagramsEnabled = all || extensionsKey.Contains("diagrams", StringComparison.OrdinalIgnoreCase);
+
+            // Feature flags coming from C++ via extensions string ("|sh:on|sh-theme:dark"), explicit token compare to avoid substring false positives.
+            var extensionTokens = extensionsKey.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            bool syntaxHighlightEnabled = extensionTokens.Contains("sh:on", StringComparer.OrdinalIgnoreCase);
+            bool syntaxHighlightDarkTheme = extensionTokens.Contains("sh-theme:dark", StringComparer.OrdinalIgnoreCase);
+
             string cssContent = GetCssContent(cssFile);
 
             var sb = new StringBuilder(source.Length + cssContent.Length + 2048);
@@ -424,6 +430,16 @@ public static class Lib
             {
                 sb.AppendLine("<script src='https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js' defer></script>");
                 sb.AppendLine("<script>window.addEventListener('load',function(){if(window.mermaid){try{mermaid.initialize({startOnLoad:true,theme:'default'});}catch(e){}}});</script>");
+            }
+            if (syntaxHighlightEnabled)
+            {
+                string hljsTheme = syntaxHighlightDarkTheme ? "github-dark" : "github";
+                sb.Append("<link rel='stylesheet' href='https://assets.internal/vendor/hljs/").Append(hljsTheme).AppendLine(".min.css'>");
+                sb.AppendLine("<link rel='stylesheet' href='https://assets.internal/vendor/hljs/themes/1c-overrides.css?v=5'>");
+                sb.AppendLine("<script src='https://assets.internal/vendor/hljs/highlight.min.js' defer></script>");
+                sb.AppendLine("<script src='https://assets.internal/vendor/hljs/languages/fsharp.min.js' defer></script>");
+                sb.AppendLine("<script src='https://assets.internal/vendor/hljs/languages/1c.min.js' defer></script>");
+                sb.AppendLine("<script>document.addEventListener('DOMContentLoaded',function(){if(!window.hljs)return;var aliasMap={'c#':'csharp','f#':'fsharp','1с':'1c','bsl':'1c'};document.querySelectorAll('pre code:not(.language-mermaid)').forEach(function(b){var lc=b.className.split(/\\s+/).find(function(c){return c.indexOf('language-')===0;});if(!lc)return;var lang=lc.substring(9).toLowerCase();lang=aliasMap[lang]||lang;if(!window.hljs.getLanguage(lang))return;try{var r=hljs.highlight(b.textContent||'',{language:lang,ignoreIllegals:true});b.innerHTML=r.value;b.classList.add('hljs');b.dataset.highlighted='yes';}catch(e){}});});</script>");
             }
             sb.AppendLine("</head>");
             sb.AppendLine("<body>");
