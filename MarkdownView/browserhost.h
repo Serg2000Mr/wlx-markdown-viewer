@@ -18,7 +18,6 @@ enum FocusCatchType {fctNoCatch, fctQuickView, fctLister};
 //=====================================================================//
 
 class CBrowserHost : 
-	public IUnknown,
 	public IDispatch,
 	public IOleControlSite,
 	public IOleClientSite, 

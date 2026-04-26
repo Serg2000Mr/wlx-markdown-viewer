@@ -9,6 +9,7 @@
     <OutputType>Library</OutputType>
     <BaseOutputPath>$(SolutionDir)bin</BaseOutputPath>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
   </PropertyGroup>
 
   <ItemGroup>

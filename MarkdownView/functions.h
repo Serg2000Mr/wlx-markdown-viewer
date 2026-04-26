@@ -53,8 +53,8 @@ protected:
 public:
 	CSmallStringList();
 	void clear();
-	void set_size(int size);
-	void set_data(const unsigned char* buffer, int size);
+	void set_size(size_t size);
+	void set_data(const unsigned char* buffer, size_t size);
 	bool valid();
 	void load_from_ini(const char* filename, const char* section, const char* key);
 	void load_sign_from_ini(const char* filename, const char* section, const char* key);
@@ -82,13 +82,9 @@ HWND GetBrowserHostWnd(HWND child_hwnd);
 CAtlString GetFullKeyName(WORD key);
 std::wstring Utf8ToWide(const std::string& utf8);
 std::string WideToUtf8(const std::wstring& wide);
-void DebugLog(const char* location, const char* message, const char* hypothesisId = "None");
-void DebugLogW(const char* location, const wchar_t* message, const char* hypothesisId = "None");
-
-int Log(char* Section,char* Text);
-void LogTime(char* Text);
-void LogTime(int number);
-void LogTimeReset();
 void DisplayLastError(void);
+void DebugLog(const char* location, const char* message);
+void DebugLogW(const char* location, const wchar_t* message);
+void DebugLogBytes(const char* location, const void* data, size_t len);
 
 #endif //  _IEVIEW_FUNCTIONS_H_
