@@ -71,6 +71,10 @@ h6 {
   font-size: 0.85em;
   color: #59636e;
 }
+/* Содержимое <details> отступает от левого края — визуально показывает вложенность */
+details > *:not(summary) {
+  margin-left: 16px;
+}
 /* YAML frontmatter table — GitHub-style metadata block */
 .markdown-frontmatter {
   border: 1px solid #d1d9e0;

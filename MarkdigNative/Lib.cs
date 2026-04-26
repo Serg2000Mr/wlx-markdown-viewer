@@ -137,6 +137,21 @@ public static class Lib
         new(StringComparer.OrdinalIgnoreCase)
         { "sub", "sup", "kbd", "mark", "ins", "del", "small", "abbr", "cite", "q" };
 
+    // Inline-теги, разрешённые внутри <summary>:
+    // включают существующие SafePairedInlineTags + расширение для типичных GitHub-форматов
+    internal static readonly HashSet<string> SafeSummaryInlineTags =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "b", "i", "strong", "em", "code",
+            "sub", "sup", "kbd", "mark", "ins", "del", "small", "abbr", "cite", "q",
+            "br", "wbr"
+        };
+
+    // Все теги для поиска через regex (любое имя — мы потом проверим через Contains)
+    internal static readonly Regex AnyTagPattern = new(
+        @"<(/?)(\w+)\b([^>]*)>",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     internal static readonly Regex AnyVoidInlineTagPattern = new(
         @"^<(\w+)\b[^>]*/?>$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -505,6 +520,424 @@ public static class Lib
 
     sealed class SafeHtmlBlockRenderer : HtmlObjectRenderer<HtmlBlock>
     {
+        // Pipeline для рекурсивного Markdown.ToHtml внутри <details> (compact-mode).
+        // Устанавливается в SafeRawHtmlAllowlistExtension.Setup.
+        public MarkdownPipeline? Pipeline { get; set; }
+
+        // Лимит глубины рекурсии compact-<details>. Защищает от stack overflow
+        // на crafted markdown с глубокой вложенностью.
+        // ThreadStatic — потому что каждый рекурсивный Markdown.ToHtml создаёт новый
+        // SafeHtmlBlockRenderer instance, и нужен счётчик, общий для всей цепочки вызовов.
+        [ThreadStatic]
+        private static int _detailsRecursionDepth;
+        private const int MaxDetailsRecursionDepth = 16;
+
+        // Санитизация содержимого <summary>: разрешает только теги из SafeSummaryInlineTags,
+        // канонизирует их (атрибуты отбрасываются), весь остальной текст HTML-экранируется.
+        // Quote-aware tokenizer (учитывает ' и " в атрибутах при поиске конца тега).
+        internal static string SanitizeSummaryInline(string content)
+        {
+            var sb = new StringBuilder();
+            int pos = 0;
+            while (pos < content.Length)
+            {
+                int lt = content.IndexOf('<', pos);
+                if (lt < 0)
+                {
+                    AppendEscaped(sb, content, pos, content.Length - pos);
+                    break;
+                }
+                if (lt > pos)
+                    AppendEscaped(sb, content, pos, lt - pos);
+
+                // Проверяем, что после '<' идёт буква (потенциальный тег) или '/'
+                int nameStart = lt + 1;
+                bool isClosing = false;
+                if (nameStart < content.Length && content[nameStart] == '/')
+                {
+                    isClosing = true;
+                    nameStart++;
+                }
+                if (nameStart >= content.Length || !char.IsLetter(content[nameStart]))
+                {
+                    // Не тег — экранируем '<' и продолжаем
+                    sb.Append("&lt;");
+                    pos = lt + 1;
+                    continue;
+                }
+
+                // Извлекаем имя тега
+                int nameEnd = nameStart;
+                while (nameEnd < content.Length && (char.IsLetterOrDigit(content[nameEnd]) || content[nameEnd] == '-'))
+                    nameEnd++;
+                string tagName = content.Substring(nameStart, nameEnd - nameStart).ToLowerInvariant();
+
+                // Quote-aware конец тега
+                int tagEnd = FindTagEnd(content, nameEnd);
+                if (tagEnd < 0)
+                {
+                    // Незакрытый тег — экранируем как литерал
+                    AppendEscaped(sb, content, lt, content.Length - lt);
+                    break;
+                }
+
+                if (SafeSummaryInlineTags.Contains(tagName))
+                {
+                    sb.Append(isClosing ? "</" : "<");
+                    sb.Append(tagName);
+                    sb.Append('>');
+                }
+                // else: тег вырезается
+
+                pos = tagEnd + 1;
+            }
+            return sb.ToString();
+        }
+
+        private static void AppendEscaped(StringBuilder sb, string s, int start, int length)
+        {
+            int end = start + length;
+            for (int i = start; i < end; i++)
+            {
+                char c = s[i];
+                switch (c)
+                {
+                    case '&': sb.Append("&amp;"); break;
+                    case '<': sb.Append("&lt;"); break;
+                    case '>': sb.Append("&gt;"); break;
+                    case '"': sb.Append("&quot;"); break;
+                    default: sb.Append(c); break;
+                }
+            }
+        }
+
+        // Проверяет границу имени тега: следующий символ после имени тега должен быть
+        // whitespace, '/', '>', или конец строки.
+        internal static bool IsTagBoundaryAt(string s, int pos)
+        {
+            if (pos >= s.Length) return true;
+            char c = s[pos];
+            return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '/' || c == '>';
+        }
+
+        // Проверяет, что в позиции pos начинается тег с заданным именем (case-insensitive)
+        // и правильной границей. isClose=true для проверки закрывающего </name>.
+        internal static bool IsTagAt(string s, int pos, string name, bool isClose)
+        {
+            int prefixLen = name.Length + (isClose ? 2 : 1); // < + name или </ + name
+            if (pos + prefixLen > s.Length) return false;
+            string expected = isClose ? "</" + name : "<" + name;
+            if (string.Compare(s, pos, expected, 0, prefixLen, StringComparison.OrdinalIgnoreCase) != 0)
+                return false;
+            return IsTagBoundaryAt(s, pos + prefixLen);
+        }
+
+        // Извлекает <summary>...</summary> начиная с позиции from (quote-aware).
+        // Возвращает (success, summary_inner, position_after_close).
+        internal static (bool ok, string summary, int consumedTo) TryExtractSummaryAt(string s, int from)
+        {
+            if (!IsTagAt(s, from, "summary", false))
+                return (false, "", from);
+
+            int openEnd = FindTagEnd(s, from + 8);
+            if (openEnd < 0) return (false, "", from);
+
+            string attrs = s.Substring(from + 8, openEnd - (from + 8)).TrimEnd();
+            // Self-closing <summary/> — пустой summary
+            if (attrs.EndsWith("/"))
+                return (true, "", openEnd + 1);
+
+            // Ищем </summary> с правильной границей
+            int pos = openEnd + 1;
+            int closeStart = -1;
+            while (pos < s.Length)
+            {
+                int lt = s.IndexOf('<', pos);
+                if (lt < 0) return (false, "", from);
+                if (IsTagAt(s, lt, "summary", true))
+                {
+                    closeStart = lt;
+                    break;
+                }
+                pos = lt + 1;
+            }
+            if (closeStart < 0) return (false, "", from);
+
+            int closeEnd = FindTagEnd(s, closeStart + 9);
+            if (closeEnd < 0) return (false, "", from);
+
+            string summary = s.Substring(openEnd + 1, closeStart - (openEnd + 1));
+            return (true, summary, closeEnd + 1);
+        }
+
+        // Quote-aware поиск конца HTML-тега: пропускает '>' внутри одинарных и двойных кавычек.
+        // Возвращает позицию '>' или -1 если не найдено.
+        internal static int FindTagEnd(string s, int after)
+        {
+            char quote = '\0';
+            for (int i = after; i < s.Length; i++)
+            {
+                char c = s[i];
+                if (quote != '\0')
+                {
+                    if (c == quote) quote = '\0';
+                }
+                else
+                {
+                    if (c == '"' || c == '\'') quote = c;
+                    else if (c == '>') return i;
+                }
+            }
+            return -1;
+        }
+
+        // Проверяет, что в позиции pos строки s начинается тег <details или </details
+        // с правильной границей имени тега. Исключает <details-extra>, <detailsfoo> и т.п.
+        // Возвращает: 0 = не details тег, 1 = открывающий <details, -1 = закрывающий </details.
+        internal static int DetailsTagKindAt(string s, int pos)
+        {
+            if (IsTagAt(s, pos, "details", false)) return 1;
+            if (IsTagAt(s, pos, "details", true)) return -1;
+            return 0;
+        }
+
+        // Проверяет, что позиция pos находится в начале строки (с indent <= 3 пробелов).
+        // Используется для CommonMark-style fenced code: fence должен быть в начале строки.
+        internal static bool IsAtLineStart(string s, int pos)
+        {
+            int lineStart = pos;
+            while (lineStart > 0 && s[lineStart - 1] != '\n') lineStart--;
+            int indent = 0;
+            int p = lineStart;
+            while (p < pos && (s[p] == ' ') && indent < 4)
+            {
+                indent++;
+                p++;
+            }
+            return p == pos && indent <= 3;
+        }
+
+        // Находит границы fenced code blocks (``` или ~~~) и inline code (`...`) для skip-маски.
+        // Возвращает упорядоченный список (start, end) — pos-ы, которые НЕ нужно сканировать как HTML.
+        internal static List<(int start, int end)> FindCodeRegions(string s)
+        {
+            var regions = new List<(int, int)>();
+            int i = 0;
+            while (i < s.Length)
+            {
+                // Fenced ``` или ~~~ — opening fence ДОЛЖЕН быть в начале строки (с indent <= 3)
+                if (i + 3 <= s.Length && (s[i] == '`' || s[i] == '~') && IsAtLineStart(s, i))
+                {
+                    char fence = s[i];
+                    int run = 0;
+                    while (i + run < s.Length && s[i + run] == fence) run++;
+                    if (run >= 3)
+                    {
+                        // Конец строки fence
+                        int eol = s.IndexOf('\n', i);
+                        if (eol < 0) { i++; continue; }
+
+                        // Ищем закрывающий fence в начале строки, не менее run символов
+                        int searchFrom = eol + 1;
+                        int closePos = -1;
+                        while (searchFrom < s.Length)
+                        {
+                            int next = s.IndexOf(fence, searchFrom);
+                            if (next < 0) break;
+                            int lineStart = next;
+                            while (lineStart > 0 && s[lineStart - 1] != '\n') lineStart--;
+                            int indent = 0;
+                            int p = lineStart;
+                            while (p < next && s[p] == ' ' && indent < 4) { indent++; p++; }
+                            if (p == next && indent <= 3)
+                            {
+                                int lineCloseRun = 0;
+                                int q = next;
+                                while (q < s.Length && s[q] == fence) { lineCloseRun++; q++; }
+                                if (lineCloseRun >= run)
+                                {
+                                    closePos = q;
+                                    break;
+                                }
+                            }
+                            searchFrom = next + 1;
+                        }
+                        if (closePos < 0) closePos = s.Length;
+                        regions.Add((i, closePos));
+                        i = closePos;
+                        continue;
+                    }
+                }
+                // Inline code: одиночная или двойная backtick (может быть в любой позиции строки)
+                if (s[i] == '`')
+                {
+                    int run = 0;
+                    while (i + run < s.Length && s[i + run] == '`') run++;
+                    if (run < 3)
+                    {
+                        int closeRun = s.IndexOf(new string('`', run), i + run);
+                        if (closeRun < 0) { i++; continue; }
+                        regions.Add((i, closeRun + run));
+                        i = closeRun + run;
+                        continue;
+                    }
+                }
+                i++;
+            }
+            return regions;
+        }
+
+        // Проверяет, попадает ли позиция в один из code regions.
+        internal static bool IsInsideCode(List<(int start, int end)> regions, int pos)
+        {
+            foreach (var r in regions)
+                if (pos >= r.start && pos < r.end) return true;
+            return false;
+        }
+
+        // Находит следующий details-тег (любого вида) начиная с pos, пропуская code regions.
+        // Возвращает (-1, 0) если не найден.
+        internal static (int pos, int kind) FindNextDetailsTag(string s, int from, List<(int start, int end)> codeRegions)
+        {
+            int pos = from;
+            while (pos < s.Length)
+            {
+                int lt = s.IndexOf('<', pos);
+                if (lt < 0) return (-1, 0);
+                if (IsInsideCode(codeRegions, lt))
+                {
+                    // Перепрыгиваем за конец code region
+                    foreach (var r in codeRegions)
+                    {
+                        if (lt >= r.start && lt < r.end) { pos = r.end; goto NextIter; }
+                    }
+                    pos = lt + 1;
+                    continue;
+                }
+                int kind = DetailsTagKindAt(s, lt);
+                if (kind != 0) return (lt, kind);
+                pos = lt + 1;
+                NextIter:;
+            }
+            return (-1, 0);
+        }
+
+        // Balanced-парсер для одного <details>...</details> с поддержкой вложенности.
+        // Учитывает кавычки в атрибутах, границы имени тега, self-closing варианты,
+        // и пропускает details-теги внутри code-блоков.
+        // Возвращает позицию ПОСЛЕ закрывающего тега для последующего парсинга соседних блоков.
+        internal static (bool ok, string attrs, string? summary, string inner, int consumedTo) TryParseOneDetailsBlock(string content, int startPos)
+        {
+            // Должен начинаться с <details с правильной границей
+            if (DetailsTagKindAt(content, startPos) != 1)
+                return (false, "", null, "", startPos);
+
+            // Quote-aware конец открывающего тега
+            int gt = FindTagEnd(content, startPos + 8);
+            if (gt < 0) return (false, "", null, "", startPos);
+            string attrs = content.Substring(startPos + 8, gt - (startPos + 8));
+
+            // Self-closing <details/> — пустой блок без содержимого
+            string attrsTrimmed = attrs.TrimEnd();
+            if (attrsTrimmed.EndsWith("/"))
+            {
+                return (true, attrsTrimmed.Substring(0, attrsTrimmed.Length - 1).TrimEnd(), null, "", gt + 1);
+            }
+
+            // Balanced walk с пропуском code-блоков
+            var codeRegions = FindCodeRegions(content);
+
+            int depth = 1;
+            int pos = gt + 1;
+            int closeStart = -1;
+            int closeEnd = -1;
+
+            while (pos < content.Length && depth > 0)
+            {
+                var (tagPos, kind) = FindNextDetailsTag(content, pos, codeRegions);
+                if (tagPos < 0)
+                    return (false, "", null, "", startPos); // unbalanced
+
+                int tagEnd = FindTagEnd(content, tagPos + (kind > 0 ? 8 : 9));
+                if (tagEnd < 0) return (false, "", null, "", startPos);
+
+                if (kind > 0)
+                {
+                    // Открывающий — проверяем self-closing
+                    string innerAttrs = content.Substring(tagPos + 8, tagEnd - (tagPos + 8)).TrimEnd();
+                    if (!innerAttrs.EndsWith("/"))
+                        depth++;
+                    // Если self-closing — depth не меняется (это void-тег)
+                    pos = tagEnd + 1;
+                }
+                else
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        closeStart = tagPos;
+                        closeEnd = tagEnd;
+                    }
+                    pos = tagEnd + 1;
+                }
+            }
+
+            if (closeStart < 0) return (false, "", null, "", startPos);
+
+            string body = content.Substring(gt + 1, closeStart - gt - 1).Trim();
+
+            // Опциональный <summary>...</summary> в начале body (quote-aware)
+            string? summary = null;
+            string inner = body;
+            var summaryExtract = TryExtractSummaryAt(body, 0);
+            if (summaryExtract.ok)
+            {
+                summary = summaryExtract.summary;
+                inner = body.Substring(summaryExtract.consumedTo).Trim();
+            }
+
+            return (true, attrs, summary, inner, closeEnd + 1);
+        }
+
+        // Помогает emit'ить один уже распарсенный <details> блок в выходной поток.
+        private void EmitDetails(HtmlRenderer renderer, string attrs, string? summary, string inner)
+        {
+            bool isOpen = DetailsOpenAttrPattern.IsMatch(attrs);
+            renderer.Write(isOpen ? "<details open>" : "<details>");
+
+            if (summary != null)
+            {
+                renderer.Write("<summary>");
+                renderer.Write(SanitizeSummaryInline(summary));
+                renderer.Write("</summary>");
+            }
+
+            if (!string.IsNullOrEmpty(inner))
+            {
+                if (Pipeline != null && _detailsRecursionDepth < MaxDetailsRecursionDepth)
+                {
+                    _detailsRecursionDepth++;
+                    try
+                    {
+                        renderer.Write(Markdown.ToHtml(inner, Pipeline));
+                    }
+                    finally
+                    {
+                        _detailsRecursionDepth--;
+                    }
+                }
+                else
+                {
+                    // Превышен лимит глубины ИЛИ Pipeline не установлен — fallback в безопасный escape
+                    renderer.Write("<p>");
+                    renderer.Write(SanitizeSummaryInline(inner));
+                    renderer.Write("</p>");
+                }
+            }
+
+            renderer.Write("</details>").WriteLine();
+        }
+
         protected override void Write(HtmlRenderer renderer, HtmlBlock obj)
         {
             var lines = obj.Lines.Lines;
@@ -536,84 +969,157 @@ public static class Lib
                 return;
             }
 
-            // Compact full-block <details ...>...</details> в одном HtmlBlock.
-            // Должен проверяться ПЕРЕД open-fragment regex (иначе open-pattern сработает на полном блоке).
-            var detailsFull = HtmlDetailsFullBlockPattern.Match(content);
-            if (detailsFull.Success)
+            // Compact full-block: один или несколько <details>...</details> в одном HtmlBlock.
+            // Использует balanced-парсер для вложенности + цикл для соседних блоков.
+            // Должен проверяться ПЕРЕД open-fragment regex.
             {
-                string attrs = detailsFull.Groups[1].Value;
-                bool isOpen = DetailsOpenAttrPattern.IsMatch(attrs);
+                int pos = 0;
+                var blocks = new List<(string attrs, string? summary, string inner)>();
 
-                renderer.Write(isOpen ? "<details open>" : "<details>");
-
-                if (detailsFull.Groups[2].Success)
+                while (pos < content.Length)
                 {
-                    renderer.Write("<summary>");
-                    renderer.WriteEscape(detailsFull.Groups[2].Value);
-                    renderer.Write("</summary>");
+                    // Пропускаем whitespace между блоками
+                    while (pos < content.Length && char.IsWhiteSpace(content[pos])) pos++;
+                    if (pos >= content.Length) break;
+
+                    // Ожидаем <details — иначе это не последовательность details блоков
+                    if (string.Compare(content, pos, "<details", 0, 8, StringComparison.OrdinalIgnoreCase) != 0)
+                    {
+                        blocks.Clear();
+                        break;
+                    }
+
+                    var chunk = TryParseOneDetailsBlock(content, pos);
+                    if (!chunk.ok)
+                    {
+                        blocks.Clear();
+                        break;
+                    }
+                    blocks.Add((chunk.attrs, chunk.summary, chunk.inner));
+                    pos = chunk.consumedTo;
                 }
 
-                string inner = detailsFull.Groups[3].Value.Trim();
-                if (!string.IsNullOrEmpty(inner))
+                if (blocks.Count > 0)
                 {
-                    // Compact-mode: inner content рендерится как escape'нутый текст.
-                    // Для markdown в details — использовать пустые строки (fragment mode).
-                    renderer.Write("<p>");
-                    renderer.WriteEscape(inner);
-                    renderer.Write("</p>");
+                    foreach (var b in blocks)
+                        EmitDetails(renderer, b.attrs, b.summary, b.inner);
+                    return;
                 }
-
-                renderer.Write("</details>").WriteLine();
-                return;
             }
 
             // <details ...> [+ optional <summary>X</summary>] (fragment mode, без </details>)
-            var detailsOpen = HtmlDetailsOpenFragmentPattern.Match(content);
-            if (detailsOpen.Success)
+            // Quote-aware вместо regex
             {
-                string attrs = detailsOpen.Groups[1].Value;
-                bool isOpen = DetailsOpenAttrPattern.IsMatch(attrs);
-                renderer.Write(isOpen ? "<details open>" : "<details>");
-
-                if (detailsOpen.Groups[2].Success)
+                string trimmed = content.TrimStart();
+                int trimOffset = content.Length - trimmed.Length;
+                if (DetailsTagKindAt(trimmed, 0) == 1)
                 {
-                    renderer.Write("<summary>");
-                    renderer.WriteEscape(detailsOpen.Groups[2].Value);
-                    renderer.Write("</summary>");
+                    int gt = FindTagEnd(trimmed, 8);
+                    if (gt > 0)
+                    {
+                        string attrs = trimmed.Substring(8, gt - 8);
+                        // Не self-closing (это бы парсилось как compact full block выше)
+                        // и нет </details> в этом блоке (иначе парсилось бы как compact)
+                        // — проверяем что после opening идёт либо whitespace до конца, либо <summary>...</summary>
+                        string after = trimmed.Substring(gt + 1).TrimStart();
+                        bool isOpen = DetailsOpenAttrPattern.IsMatch(attrs);
+
+                        // Проверяем что нет </details> в этом блоке
+                        bool hasClose = false;
+                        int searchPos = gt + 1;
+                        while (searchPos < trimmed.Length)
+                        {
+                            int lt = trimmed.IndexOf('<', searchPos);
+                            if (lt < 0) break;
+                            if (DetailsTagKindAt(trimmed, lt) == -1) { hasClose = true; break; }
+                            searchPos = lt + 1;
+                        }
+
+                        if (!hasClose)
+                        {
+                            // Опциональный <summary>...</summary> сразу после opening
+                            string? summary = null;
+                            string trailingAfter = after;
+                            if (after.Length > 0)
+                            {
+                                var sm = TryExtractSummaryAt(after, 0);
+                                if (sm.ok)
+                                {
+                                    summary = sm.summary;
+                                    trailingAfter = after.Substring(sm.consumedTo).TrimStart();
+                                }
+                            }
+                            // Допустимо: после opening — только summary и/или whitespace
+                            if (trailingAfter.Length == 0)
+                            {
+                                renderer.Write(isOpen ? "<details open>" : "<details>");
+                                if (summary != null)
+                                {
+                                    renderer.Write("<summary>");
+                                    renderer.Write(SanitizeSummaryInline(summary));
+                                    renderer.Write("</summary>");
+                                }
+                                renderer.WriteLine();
+                                return;
+                            }
+                        }
+                    }
                 }
-                renderer.WriteLine();
-                return;
             }
 
             // </details>
-            if (HtmlDetailsCloseFragmentPattern.IsMatch(content))
             {
-                renderer.Write("</details>").WriteLine();
-                return;
+                string trimmed = content.Trim();
+                if (DetailsTagKindAt(trimmed, 0) == -1)
+                {
+                    int gt = FindTagEnd(trimmed, 9);
+                    if (gt > 0 && trimmed.Substring(gt + 1).Trim().Length == 0)
+                    {
+                        renderer.Write("</details>").WriteLine();
+                        return;
+                    }
+                }
             }
 
-            // <summary>full</summary>
-            var summaryFull = HtmlSummaryFullFragmentPattern.Match(content);
-            if (summaryFull.Success)
+            // <summary>full</summary> — quote-aware
             {
-                renderer.Write("<summary>");
-                renderer.WriteEscape(summaryFull.Groups[1].Value);
-                renderer.Write("</summary>").WriteLine();
-                return;
+                string trimmed = content.Trim();
+                var sm = TryExtractSummaryAt(trimmed, 0);
+                if (sm.ok && sm.consumedTo == trimmed.Length)
+                {
+                    renderer.Write("<summary>");
+                    renderer.Write(SanitizeSummaryInline(sm.summary));
+                    renderer.Write("</summary>").WriteLine();
+                    return;
+                }
             }
 
-            // <summary> open
-            if (HtmlSummaryOpenFragmentPattern.IsMatch(content))
+            // <summary> open (без закрытия)
             {
-                renderer.Write("<summary>").WriteLine();
-                return;
+                string trimmed = content.Trim();
+                if (IsTagAt(trimmed, 0, "summary", false))
+                {
+                    int gt = FindTagEnd(trimmed, 8);
+                    if (gt > 0 && trimmed.Substring(gt + 1).Trim().Length == 0)
+                    {
+                        renderer.Write("<summary>").WriteLine();
+                        return;
+                    }
+                }
             }
 
             // </summary>
-            if (HtmlSummaryCloseFragmentPattern.IsMatch(content))
             {
-                renderer.Write("</summary>").WriteLine();
-                return;
+                string trimmed = content.Trim();
+                if (IsTagAt(trimmed, 0, "summary", true))
+                {
+                    int gt = FindTagEnd(trimmed, 9);
+                    if (gt > 0 && trimmed.Substring(gt + 1).Trim().Length == 0)
+                    {
+                        renderer.Write("</summary>").WriteLine();
+                        return;
+                    }
+                }
             }
 
             // Не наш формат — стрипаем (как DisableHtml)
@@ -634,7 +1140,8 @@ public static class Lib
 
             var blockExisting = h.ObjectRenderers.FindExact<HtmlBlockRenderer>();
             if (blockExisting != null) h.ObjectRenderers.Remove(blockExisting);
-            h.ObjectRenderers.Add(new SafeHtmlBlockRenderer());
+            // Pipeline передаётся для рекурсивного Markdown.ToHtml внутри <details> compact-mode
+            h.ObjectRenderers.Add(new SafeHtmlBlockRenderer { Pipeline = pipeline });
         }
     }
 
